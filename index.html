@@ -41,12 +41,10 @@
   <style>
     body {
       font-family: 'Noto Sans Hebrew', 'Noto Sans Hebrew New', sans-serif;
-      background-color: #f8fafc; /* slate-50 */
+      background-color: #f8fafc;
       overflow-x: hidden;
     }
-    .animate-in {
-      animation: fadeIn 0.5s ease-out;
-    }
+    .animate-in { animation: fadeIn 0.5s ease-out; }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
@@ -76,7 +74,7 @@
       }
     };
 
-    const apiKey = ""; // <-- place your key here (client-side key is not recommended for production)
+    const apiKey = ""; // client-side key is not recommended for production
     const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
 
     const fetchGemini = async (prompt, systemInstruction = "") => {
@@ -104,6 +102,7 @@
           throw error;
         }
       };
+
       return callApi();
     };
 
@@ -151,8 +150,8 @@
     };
 
     /** --- SIMPLE RUNTIME TESTS (NO UI IMPACT) --- */
-    const runSelfTests = (calculateBillableHours) => {
-      const tests = [
+    const runSelfTests = ({ calculateBillableHours, groupTasksByStatus }) => {
+      const bhTests = [
         { in: 0, out: 0 },
         { in: -10, out: 0 },
         { in: 1, out: 0.5 },
@@ -165,22 +164,75 @@
         { in: 91, out: 2.0 }
       ];
 
-      const failures = [];
-      for (const t of tests) {
+      const bhFailures = [];
+      for (const t of bhTests) {
         const got = calculateBillableHours(t.in);
-        if (got !== t.out) failures.push({ input: t.in, expected: t.out, got });
+        if (got !== t.out) bhFailures.push({ input: t.in, expected: t.out, got });
       }
 
-      if (failures.length) {
-        console.error('[Studio OS Tests] FAILED', failures);
+      const group = groupTasksByStatus([
+        { id: 'a', status: 'ממתין לי' },
+        { id: 'b', status: 'בוצע' },
+        { id: 'c', status: 'לביצוע' }
+      ]);
+
+      const groupOk = (group.waiting.length === 1 && group.done.length === 1 && group.other.length === 1);
+
+      if (bhFailures.length || !groupOk) {
+        console.error('[Studio OS Tests] FAILED', { bhFailures, group });
       } else {
-        console.info('[Studio OS Tests] PASSED', tests.length);
+        console.info('[Studio OS Tests] PASSED');
       }
     };
 
-    /** --- UI PRIMITIVES (CLICKABLE / NON-CLICKABLE STATES) --- */
+    /** --- UTILS --- */
     const cx = (...classes) => classes.filter(Boolean).join(' ');
 
+    const TASK_STATUS = {
+      WAITING: 'ממתין לי',
+      DONE: 'בוצע',
+      TODO: 'לביצוע'
+    };
+
+    const TERMS_PRESETS = [
+      'שוטף 15',
+      'שוטף 30',
+      'שוטף 45',
+      'שוטף 60',
+      'תשלום מראש',
+      'מקדמה 50% + יתרה בסיום',
+      'בנק שעות',
+      'ריטיינר חודשי',
+      'כרטיס אשראי',
+      'העברה בנקאית'
+    ];
+
+    const groupTasksByStatus = (tasks) => {
+      const waiting = [];
+      const done = [];
+      const other = [];
+
+      for (const t of tasks) {
+        if (t.status === TASK_STATUS.WAITING) waiting.push(t);
+        else if (t.status === TASK_STATUS.DONE) done.push(t);
+        else other.push(t);
+      }
+
+      // newest first by date if available
+      const sortByDateDesc = (a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : 0;
+        const db = b.date ? new Date(b.date).getTime() : 0;
+        return db - da;
+      };
+
+      waiting.sort(sortByDateDesc);
+      done.sort(sortByDateDesc);
+      other.sort(sortByDateDesc);
+
+      return { waiting, done, other };
+    };
+
+    /** --- UI PRIMITIVES --- */
     const Button = ({
       children,
       className = "",
@@ -189,9 +241,10 @@
       disabled = false,
       type = "button",
       onClick,
-      title
+      title,
+      ariaLabel
     }) => {
-      const base = "inline-flex items-center justify-center gap-2 font-black rounded-2xl transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none active:scale-[0.99]";
+      const base = "inline-flex items-center justify-center gap-2 rounded-2xl transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none active:scale-[0.99]";
       const sizes = {
         sm: "px-3 py-2 text-xs",
         md: "px-4 py-2.5 text-sm",
@@ -202,7 +255,8 @@
         secondary: "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50",
         ghost: "bg-transparent text-slate-300 hover:text-white hover:bg-white/5",
         danger: "bg-red-600 text-white hover:bg-red-700",
-        subtle: "bg-slate-100 text-slate-800 hover:bg-slate-200"
+        subtle: "bg-slate-100 text-slate-800 hover:bg-slate-200",
+        pill: "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50"
       };
       return (
         <button
@@ -211,6 +265,7 @@
           onClick={disabled ? undefined : onClick}
           className={cx(base, sizes[size] || sizes.md, variants[variant] || variants.primary, className)}
           title={title}
+          aria-label={ariaLabel}
         >
           {children}
         </button>
@@ -219,6 +274,12 @@
 
     const Card = ({ children, className = "" }) => (
       <div className={cx("bg-white rounded-[1.5rem] border border-slate-200 shadow-sm", className)}>
+        {children}
+      </div>
+    );
+
+    const Container = ({ children, className = "" }) => (
+      <div className={cx("w-full max-w-screen-2xl mx-auto px-3 sm:px-6 lg:px-10 2xl:px-12", className)}>
         {children}
       </div>
     );
@@ -237,8 +298,8 @@
       return (
         <div className="fixed inset-0 z-[100]">
           <div className="absolute inset-0 bg-slate-950/50" onClick={onClose} />
-          <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6">
-            <div className="w-full max-w-xl bg-white rounded-[1.5rem] shadow-soft border border-slate-200 overflow-hidden">
+          <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-6">
+            <div className="w-full max-w-2xl bg-white rounded-[1.5rem] shadow-soft border border-slate-200 overflow-hidden">
               <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm sm:text-base font-black truncate">{title}</div>
@@ -257,9 +318,35 @@
       );
     };
 
+    const SectionHeader = ({ title, subtitle, right }) => (
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-lg sm:text-xl font-black">{title}</h2>
+          {subtitle ? <div className="text-sm text-slate-500 mt-1">{subtitle}</div> : null}
+        </div>
+        {right ? <div className="flex items-center gap-2">{right}</div> : null}
+      </div>
+    );
+
+    const TabButton = ({ active, onClick, iconName, children, title }) => (
+      <Button
+        variant={active ? 'primary' : 'ghost'}
+        size="md"
+        className={cx(
+          "shrink-0 rounded-xl px-4 sm:px-5",
+          active ? "font-black" : "font-normal"
+        )}
+        onClick={onClick}
+        title={title}
+      >
+        <LucideIcon name={iconName} className="w-4 h-4" /> {children}
+      </Button>
+    );
+
     /** --- MAIN APP --- */
     const App = () => {
       const [activeTab, setActiveTab] = useState('logs');
+      const [tabHistory, setTabHistory] = useState([]);
 
       const [clients, setClients] = useState([
         { id: '1', name: 'סטודיו גלורי', rate: 250, threshold: 1500, terms: 'שוטף 30' },
@@ -272,7 +359,9 @@
       ]);
 
       const [tasks, setTasks] = useState([
-        { id: 't1', clientId: '1', description: 'שיחת בירור לגבי קמפיין דצמבר', status: 'ממתין לי', date: '2023-11-22' }
+        { id: 't1', clientId: '1', description: 'שיחת בירור לגבי קמפיין דצמבר', status: TASK_STATUS.WAITING, date: '2023-11-22', notes: '' },
+        { id: 't2', clientId: '2', description: 'בדיקת סטטוס תשלום ונעילת שעות לחודש', status: TASK_STATUS.TODO, date: '2023-11-24', notes: '' },
+        { id: 't3', clientId: '1', description: 'סיכום משימות ושיתוף מול הלקוח', status: TASK_STATUS.DONE, date: '2023-11-18', notes: '' }
       ]);
 
       const [filterClient, setFilterClient] = useState('all');
@@ -283,7 +372,19 @@
       // Add Client Modal state
       const [isAddClientOpen, setIsAddClientOpen] = useState(false);
       const [addClientContext, setAddClientContext] = useState('none'); // 'none' | 'log'
-      const [clientForm, setClientForm] = useState({ name: '', rate: 250, threshold: 1000, terms: 'שוטף' });
+      const [clientForm, setClientForm] = useState({
+        name: '',
+        rate: 250,
+        threshold: 1000,
+        termsPreset: 'שוטף 30',
+        termsCustom: ''
+      });
+
+      // Task details modal
+      const [taskDetailsId, setTaskDetailsId] = useState(null);
+      const selectedTask = useMemo(() => tasks.find(t => t.id === taskDetailsId) || null, [tasks, taskDetailsId]);
+
+      const [taskFilter, setTaskFilter] = useState('all'); // all | waiting | done | other
 
       const [newLog, setNewLog] = useState({
         clientId: '',
@@ -297,7 +398,9 @@
         return Math.max(0.5, Math.ceil(minutes / 30) * 0.5);
       };
 
-      useEffect(() => { runSelfTests(calculateBillableHours); }, []);
+      useEffect(() => {
+        runSelfTests({ calculateBillableHours, groupTasksByStatus });
+      }, []);
 
       const processedLogs = useMemo(() => {
         return logs
@@ -330,13 +433,22 @@
 
       const openAddClient = (context = 'none') => {
         setAddClientContext(context);
-        setClientForm({ name: '', rate: 250, threshold: 1000, terms: 'שוטף' });
+        setClientForm({ name: '', rate: 250, threshold: 1000, termsPreset: 'שוטף 30', termsCustom: '' });
         setIsAddClientOpen(true);
       };
 
       const closeAddClient = () => {
         setIsAddClientOpen(false);
         setAddClientContext('none');
+      };
+
+      const getFinalTerms = () => {
+        const preset = clientForm.termsPreset;
+        if (preset === '__custom__') {
+          const v = (clientForm.termsCustom || '').trim();
+          return v || 'אחר';
+        }
+        return preset || 'שוטף 30';
       };
 
       const handleCreateClient = (e) => {
@@ -349,7 +461,7 @@
           name,
           rate: Number(clientForm.rate) || 0,
           threshold: Number(clientForm.threshold) || 0,
-          terms: (clientForm.terms || '').trim() || 'שוטף'
+          terms: getFinalTerms()
         };
 
         setClients(prev => [...prev, newClient]);
@@ -367,11 +479,12 @@
         const minutesInt = parseInt(newLog.minutes);
         if (!newLog.clientId || !newLog.description || !minutesInt) return;
 
-        setLogs([
+        setLogs(prev => [
           { ...newLog, id: Date.now().toString(), status: 'טרם חויב', minutes: minutesInt },
-          ...logs
+          ...prev
         ]);
-        setNewLog(p => ({ ...p, description: '', minutes: '' }));
+
+        setNewLog(prev => ({ ...prev, description: '', minutes: '' }));
       };
 
       const polishDescription = async (text, setter) => {
@@ -398,6 +511,23 @@
         ? tasks
         : tasks.filter(t => t.clientId === filterClient);
 
+      const taskGroups = useMemo(() => groupTasksByStatus(filteredTasks), [filteredTasks]);
+
+      const taskCounts = useMemo(() => ({
+        all: filteredTasks.length,
+        waiting: taskGroups.waiting.length,
+        done: taskGroups.done.length,
+        other: taskGroups.other.length
+      }), [filteredTasks.length, taskGroups]);
+
+      const visibleTasks = useMemo(() => {
+        if (taskFilter === 'waiting') return taskGroups.waiting;
+        if (taskFilter === 'done') return taskGroups.done;
+        if (taskFilter === 'other') return taskGroups.other;
+        // all = grouped view is handled in UI; here return all for convenience if needed
+        return filteredTasks;
+      }, [taskFilter, taskGroups, filteredTasks]);
+
       const isLogValid = Boolean(
         newLog.clientId &&
         String(newLog.description || '').trim().length > 0 &&
@@ -406,7 +536,6 @@
 
       const handleLogClientChange = (value) => {
         if (value === '__add_new__') {
-          // keep UX clean: reset selection + open modal
           setNewLog(prev => ({ ...prev, clientId: '' }));
           openAddClient('log');
           return;
@@ -414,18 +543,121 @@
         setNewLog(prev => ({ ...prev, clientId: value }));
       };
 
-      const Container = ({ children, className = "" }) => (
-        <div className={cx("w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8", className)}>
-          {children}
-        </div>
-      );
+      const setActiveTabWithHistory = (nextTab) => {
+        if (nextTab === activeTab) return;
+        setTabHistory(prev => [...prev, activeTab]);
+        setActiveTab(nextTab);
+      };
+
+      const canGoBack = Boolean(taskDetailsId || isAddClientOpen || tabHistory.length > 0);
+
+      const handleBack = () => {
+        if (taskDetailsId) {
+          setTaskDetailsId(null);
+          return;
+        }
+        if (isAddClientOpen) {
+          closeAddClient();
+          return;
+        }
+        setTabHistory(prev => {
+          if (!prev.length) return prev;
+          const copy = [...prev];
+          const last = copy.pop();
+          setActiveTab(last);
+          return copy;
+        });
+      };
+
+      const clientNameById = (id) => clients.find(c => c.id === id)?.name || 'ללא לקוח';
+
+      const openTaskDetails = (id) => setTaskDetailsId(id);
+      const closeTaskDetails = () => setTaskDetailsId(null);
+
+      const updateTask = (id, patch) => {
+        setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
+      };
+
+      const deleteTask = (id) => {
+        setTasks(prev => prev.filter(t => t.id !== id));
+        if (taskDetailsId === id) setTaskDetailsId(null);
+      };
+
+      const TaskItem = ({ t }) => {
+        const clientName = clientNameById(t.clientId);
+        const statusStyles = t.status === TASK_STATUS.DONE
+          ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+          : t.status === TASK_STATUS.WAITING
+            ? "bg-amber-50 text-amber-700 border-amber-100"
+            : "bg-slate-50 text-slate-700 border-slate-200";
+
+        return (
+          <button
+            type="button"
+            onClick={() => openTaskDetails(t.id)}
+            className={cx(
+              "w-full text-right p-4 rounded-2xl border transition-all",
+              "bg-white border-slate-200 hover:bg-slate-50",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50",
+              "active:scale-[0.995]"
+            )}
+            title="לחץ לפרטי משימה"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-black text-sm sm:text-base truncate">{t.description}</div>
+                <div className="text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-bold">{clientName}</span>
+                  <span className="text-slate-300">-</span>
+                  <span className="font-mono text-slate-600">{t.date || 'ללא תאריך'}</span>
+                </div>
+              </div>
+              <div className={cx("text-[11px] sm:text-xs font-black px-2.5 py-1.5 rounded-xl border whitespace-nowrap", statusStyles)}>
+                {t.status}
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="text-xs text-slate-500 truncate">
+                {t.notes ? 'יש פירוט נוסף' : 'אין פירוט נוסף'}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    updateTask(t.id, { status: TASK_STATUS.DONE });
+                  }}
+                  className={cx(
+                    "inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-black transition-all",
+                    "bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60"
+                  )}
+                  title="סמן כבוצע"
+                  aria-label="סמן כבוצע"
+                >
+                  <LucideIcon name="Check" className="w-4 h-4" /> בוצע
+                </button>
+
+                <span className="text-slate-300">|</span>
+
+                <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                  <LucideIcon name="ChevronLeft" className="w-4 h-4" /> פרטים
+                </span>
+              </div>
+            </div>
+          </button>
+        );
+      };
 
       return (
         <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col" dir="rtl">
           <nav className="bg-slate-950 text-white shadow-xl sticky top-0 z-50 border-b border-slate-800/60">
             <Container className="py-3 sm:py-4">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-6">
-                <div className="flex items-center justify-between md:justify-start gap-3 min-w-0">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
+                <div className="flex items-center justify-between lg:justify-start gap-3 min-w-0">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 rounded-2xl bg-indigo-600/90 border border-white/10 shadow-soft flex items-center justify-center shrink-0">
                       <LucideIcon name="LayoutDashboard" className="w-5 h-5" />
@@ -435,37 +667,47 @@
                       <span className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest block mt-1 truncate">Studio OS – Billing & AI</span>
                     </div>
                   </div>
+
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    className={cx("rounded-xl px-3 sm:px-4", !canGoBack && "opacity-50")}
+                    onClick={handleBack}
+                    disabled={!canGoBack}
+                    title="חזרה"
+                    ariaLabel="חזרה"
+                  >
+                    <LucideIcon name="ArrowRight" className="w-4 h-4" />
+                    <span className="hidden sm:inline font-normal">חזרה</span>
+                  </Button>
                 </div>
 
-                <div className="w-full md:w-auto">
-                  <div className="flex bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800/70 shadow-sm w-full md:w-auto overflow-x-auto custom-scroll">
-                    <Button
-                      variant={activeTab === 'logs' ? 'primary' : 'ghost'}
-                      size="md"
-                      className="shrink-0 rounded-xl px-4 sm:px-5"
-                      onClick={() => setActiveTab('logs')}
+                <div className="w-full lg:w-auto">
+                  <div className="flex bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800/70 shadow-sm w-full lg:w-auto overflow-x-auto custom-scroll">
+                    <TabButton
+                      active={activeTab === 'logs'}
+                      onClick={() => setActiveTabWithHistory('logs')}
+                      iconName="ClipboardList"
                       title="יומן עבודה"
                     >
-                      <LucideIcon name="ClipboardList" className="w-4 h-4" /> יומן עבודה
-                    </Button>
-                    <Button
-                      variant={activeTab === 'tasks' ? 'primary' : 'ghost'}
-                      size="md"
-                      className="shrink-0 rounded-xl px-4 sm:px-5"
-                      onClick={() => setActiveTab('tasks')}
+                      יומן עבודה
+                    </TabButton>
+                    <TabButton
+                      active={activeTab === 'tasks'}
+                      onClick={() => setActiveTabWithHistory('tasks')}
+                      iconName="ListTodo"
                       title="צ'ק-ליסט"
                     >
-                      <LucideIcon name="ListTodo" className="w-4 h-4" /> צ'ק-ליסט
-                    </Button>
-                    <Button
-                      variant={activeTab === 'clients' ? 'primary' : 'ghost'}
-                      size="md"
-                      className="shrink-0 rounded-xl px-4 sm:px-5"
-                      onClick={() => setActiveTab('clients')}
+                      צ'ק-ליסט
+                    </TabButton>
+                    <TabButton
+                      active={activeTab === 'clients'}
+                      onClick={() => setActiveTabWithHistory('clients')}
+                      iconName="Users"
                       title="לקוחות"
                     >
-                      <LucideIcon name="Users" className="w-4 h-4" /> לקוחות
-                    </Button>
+                      לקוחות
+                    </TabButton>
                   </div>
                 </div>
               </div>
@@ -475,195 +717,219 @@
           <main className="w-full flex-1">
             <Container className="py-4 sm:py-6 lg:py-8">
               {activeTab === 'logs' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 animate-in">
-                  <div className="space-y-4 sm:space-y-6">
-                    <Card className="p-4 sm:p-5 lg:p-6">
-                      <div className="flex items-center justify-between gap-3 mb-4">
-                        <h2 className="text-base sm:text-lg font-bold flex items-center gap-2">
-                          <LucideIcon name="PlusCircle" className="text-indigo-600" /> דיווח עבודה
-                        </h2>
-                      </div>
+                <div className="animate-in">
+                  <SectionHeader
+                    title="יומן עבודה"
+                    subtitle="דיווח, חישוב שעות וחובות פתוחים"
+                  />
 
-                      <form onSubmit={handleAddLog} className="space-y-3 sm:space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-[11px] font-black text-slate-500">לקוח</label>
-                          <select
-                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                            value={newLog.clientId}
-                            onChange={(e) => handleLogClientChange(e.target.value)}
-                            required
-                          >
-                            <option value="">בחר לקוח...</option>
-                            {clients.map(c => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                            <option value="__add_new__">הוסף לקוח חדש</option>
-                          </select>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
+                    <div className="space-y-4 sm:space-y-6">
+                      <Card className="p-4 sm:p-5 lg:p-6">
+                        <div className="flex items-center justify-between gap-3 mb-4">
+                          <h3 className="text-base sm:text-lg font-black flex items-center gap-2">
+                            <LucideIcon name="PlusCircle" className="text-indigo-600" /> דיווח עבודה
+                          </h3>
                         </div>
 
-                        <div className="space-y-2">
-                          <label className="text-[11px] font-black text-slate-500">תיאור</label>
-                          <div className="relative">
-                            <textarea
-                              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                              rows="3"
-                              placeholder="מה התבצע?"
-                              value={newLog.description}
-                              onChange={(e) => setNewLog({ ...newLog, description: e.target.value })}
+                        <form onSubmit={handleAddLog} className="space-y-3 sm:space-y-4">
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-black text-slate-500">לקוח</label>
+                            <select
+                              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                              value={newLog.clientId}
+                              onChange={(e) => handleLogClientChange(e.target.value)}
                               required
-                            />
-                            <button
-                              type="button"
-                              onClick={() => polishDescription(newLog.description, (v) => setNewLog(p => ({ ...p, description: v })))}
-                              className="absolute top-2 left-2 text-[10px] font-black text-indigo-600 flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                              disabled={!newLog.description || isAiPolishing}
-                              title="לטש ניסוח"
                             >
-                              {isAiPolishing ? (
-                                <LucideIcon name="Loader2" className="animate-spin w-3 h-3" />
-                              ) : (
-                                <LucideIcon name="Sparkles" className="w-3 h-3" />
-                              )}
-                              לטיש
-                            </button>
+                              <option value="">בחר לקוח...</option>
+                              {clients.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                              <option value="__add_new__">הוסף לקוח חדש</option>
+                            </select>
                           </div>
-                        </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-2">
-                            <label className="text-[11px] font-black text-slate-500">דקות</label>
-                            <input
-                              type="number"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                              placeholder="דקות"
-                              value={newLog.minutes}
-                              onChange={(e) => setNewLog({ ...newLog, minutes: e.target.value })}
-                              required
-                              min="1"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[11px] font-black text-slate-500">תאריך</label>
-                            <input
-                              type="date"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                              value={newLog.date}
-                              onChange={(e) => setNewLog({ ...newLog, date: e.target.value })}
-                            />
-                          </div>
-                        </div>
-
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          size="lg"
-                          className="w-full uppercase tracking-wide"
-                          disabled={!isLogValid}
-                          title={!isLogValid ? "יש להשלים לקוח, תיאור ודקות" : "הוספה ליומן"}
-                        >
-                          הוספה ליומן
-                        </Button>
-                      </form>
-                    </Card>
-
-                    <Card className="p-4 sm:p-5 lg:p-6">
-                      <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">חובות מעל הרף</h3>
-                      <div className="space-y-3">
-                        {clientSummaries.filter(c => c.totalUnpaid > 0).map(c => (
-                          <div
-                            key={c.id}
-                            className={cx(
-                              "p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2",
-                              c.isOverThreshold ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-200'
-                            )}
-                          >
-                            <span className="font-bold text-sm">{c.name}</span>
-                            <span className={cx("text-sm font-black", c.isOverThreshold ? 'text-red-600' : 'text-slate-800')}>
-                              ₪{c.totalUnpaid.toLocaleString()}
-                            </span>
-                          </div>
-                        ))}
-                        {clientSummaries.filter(c => c.totalUnpaid > 0).length === 0 && (
-                          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
-                            אין כרגע חובות פתוחים
-                          </div>
-                        )}
-                      </div>
-                    </Card>
-                  </div>
-
-                  <div className="lg:col-span-2 space-y-4">
-                    {/* Mobile cards */}
-                    <div className="md:hidden space-y-3">
-                      {filteredLogs.map(log => (
-                        <Card key={log.id} className="p-4 sm:p-5">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="font-black text-sm truncate">{log.clientName}</div>
-                              <div className="mt-0.5 text-[11px] font-mono text-slate-400 whitespace-nowrap">{log.date}</div>
+                            <label className="text-[11px] font-black text-slate-500">תיאור</label>
+                            <div className="relative">
+                              <textarea
+                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                                rows="3"
+                                placeholder="מה התבצע?"
+                                value={newLog.description}
+                                onChange={(e) => setNewLog(prev => ({ ...prev, description: e.target.value }))}
+                                required
+                              />
+                              <button
+                                type="button"
+                                onClick={() => polishDescription(newLog.description, (v) => setNewLog(p => ({ ...p, description: v })))}
+                                className="absolute top-2 left-2 text-[10px] font-black text-indigo-600 flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={!newLog.description || isAiPolishing}
+                                title="לטש ניסוח"
+                              >
+                                {isAiPolishing ? (
+                                  <LucideIcon name="Loader2" className="animate-spin w-3 h-3" />
+                                ) : (
+                                  <LucideIcon name="Sparkles" className="w-3 h-3" />
+                                )}
+                                לטיש
+                              </button>
                             </div>
-                            <div className="text-sm font-black whitespace-nowrap">₪{log.totalPrice.toLocaleString()}</div>
                           </div>
-                          <div className="mt-2 text-xs text-slate-600 leading-relaxed">{log.description}</div>
-                          <div className="mt-3 flex items-center justify-between gap-3">
-                            <div className="text-xs font-black text-indigo-600 whitespace-nowrap">{log.billableHours.toFixed(1)} שעות</div>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setLogs(logs.filter(l => l.id !== log.id))}
-                              title="מחיקה"
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                              <label className="text-[11px] font-black text-slate-500">דקות</label>
+                              <input
+                                type="number"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                                placeholder="דקות"
+                                value={newLog.minutes}
+                                onChange={(e) => setNewLog(prev => ({ ...prev, minutes: e.target.value }))}
+                                required
+                                min="1"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[11px] font-black text-slate-500">תאריך</label>
+                              <input
+                                type="date"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                                value={newLog.date}
+                                onChange={(e) => setNewLog(prev => ({ ...prev, date: e.target.value }))}
+                              />
+                            </div>
+                          </div>
+
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            size="lg"
+                            className="w-full uppercase tracking-wide font-black"
+                            disabled={!isLogValid}
+                            title={!isLogValid ? "יש להשלים לקוח, תיאור ודקות" : "הוספה ליומן"}
+                          >
+                            הוספה ליומן
+                          </Button>
+                        </form>
+                      </Card>
+
+                      <Card className="p-4 sm:p-5 lg:p-6">
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">חובות מעל הרף</h3>
+                        <div className="space-y-3">
+                          {clientSummaries.filter(c => c.totalUnpaid > 0).map(c => (
+                            <div
+                              key={c.id}
+                              className={cx(
+                                "p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2",
+                                c.isOverThreshold ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-200'
+                              )}
                             >
-                              <LucideIcon name="Trash2" className="w-4 h-4" /> מחיקה
-                            </Button>
-                          </div>
-                        </Card>
-                      ))}
-                      {filteredLogs.length === 0 && (
-                        <Card className="p-6 text-center text-sm text-slate-500">אין רשומות להצגה</Card>
-                      )}
+                              <span className="font-black text-sm">{c.name}</span>
+                              <span className={cx("text-sm font-black", c.isOverThreshold ? 'text-red-600' : 'text-slate-800')}>
+                                ₪{c.totalUnpaid.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                          {clientSummaries.filter(c => c.totalUnpaid > 0).length === 0 && (
+                            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
+                              אין כרגע חובות פתוחים
+                            </div>
+                          )}
+                        </div>
+                      </Card>
                     </div>
 
-                    {/* Desktop table */}
-                    <div className="hidden md:block bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden">
-                      <div className="overflow-x-auto custom-scroll">
-                        <table className="w-full text-right min-w-[720px]">
-                          <thead className="bg-slate-50 text-[10px] uppercase font-black text-slate-400 tracking-widest border-b">
-                            <tr>
-                              <th className="px-6 py-4 whitespace-nowrap">תאריך</th>
-                              <th className="px-6 py-4 whitespace-nowrap">לקוח</th>
-                              <th className="px-6 py-4">תיאור</th>
-                              <th className="px-6 py-4 text-center">שעות</th>
-                              <th className="px-6 py-4 text-center">סה"כ</th>
-                              <th className="px-6 py-4"></th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {filteredLogs.map(log => (
-                              <tr key={log.id} className="hover:bg-slate-50">
-                                <td className="px-6 py-4 text-[10px] font-mono whitespace-nowrap text-slate-400">{log.date}</td>
-                                <td className="px-6 py-4 font-bold text-sm whitespace-nowrap">{log.clientName}</td>
-                                <td className="px-6 py-4 text-xs text-slate-600">{log.description}</td>
-                                <td className="px-6 py-4 text-center font-black text-indigo-600 text-xs">{log.billableHours.toFixed(1)}</td>
-                                <td className="px-6 py-4 text-center font-black text-sm">₪{log.totalPrice.toLocaleString()}</td>
-                                <td className="px-6 py-4 text-left">
-                                  <button
-                                    onClick={() => setLogs(logs.filter(l => l.id !== log.id))}
-                                    className="text-slate-300 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40 rounded-lg p-2"
-                                    title="מחיקה"
-                                    aria-label="מחיקה"
-                                  >
-                                    <LucideIcon name="Trash2" className="w-4 h-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                            {filteredLogs.length === 0 && (
+                    <div className="lg:col-span-2 xl:col-span-3 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="text-sm text-slate-500">
+                          מציג {filteredLogs.length} רשומות
+                        </div>
+                        <select
+                          className="w-full sm:w-auto bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                          value={filterClient}
+                          onChange={(e) => setFilterClient(e.target.value)}
+                          title="פילטר לקוח"
+                        >
+                          <option value="all">כל הלקוחות</option>
+                          {clients.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Mobile cards */}
+                      <div className="md:hidden space-y-3">
+                        {filteredLogs.map(log => (
+                          <Card key={log.id} className="p-4 sm:p-5">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-black text-sm truncate">{log.clientName}</div>
+                                <div className="mt-0.5 text-sm font-mono text-slate-500 whitespace-nowrap">{log.date}</div>
+                              </div>
+                              <div className="text-sm font-black whitespace-nowrap">₪{log.totalPrice.toLocaleString()}</div>
+                            </div>
+                            <div className="mt-2 text-sm text-slate-600 leading-relaxed">{log.description}</div>
+                            <div className="mt-3 flex items-center justify-between gap-3">
+                              <div className="text-sm font-black text-indigo-600 whitespace-nowrap">{log.billableHours.toFixed(1)} שעות</div>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setLogs(prev => prev.filter(l => l.id !== log.id))}
+                                title="מחיקה"
+                              >
+                                <LucideIcon name="Trash2" className="w-4 h-4" /> מחיקה
+                              </Button>
+                            </div>
+                          </Card>
+                        ))}
+                        {filteredLogs.length === 0 && (
+                          <Card className="p-6 text-center text-sm text-slate-500">אין רשומות להצגה</Card>
+                        )}
+                      </div>
+
+                      {/* Desktop table */}
+                      <div className="hidden md:block bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="overflow-x-auto custom-scroll">
+                          <table className="w-full text-right">
+                            <thead className="bg-slate-50 text-[10px] uppercase font-black text-slate-400 tracking-widest border-b">
                               <tr>
-                                <td className="px-6 py-8 text-center text-sm text-slate-500" colSpan="6">אין רשומות להצגה</td>
+                                <th className="px-6 py-4 whitespace-nowrap">תאריך</th>
+                                <th className="px-6 py-4 whitespace-nowrap">לקוח</th>
+                                <th className="px-6 py-4">תיאור</th>
+                                <th className="px-6 py-4 text-center">שעות</th>
+                                <th className="px-6 py-4 text-center">סה"כ</th>
+                                <th className="px-6 py-4"></th>
                               </tr>
-                            )}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {filteredLogs.map(log => (
+                                <tr key={log.id} className="hover:bg-slate-50">
+                                  <td className="px-6 py-4 text-sm font-mono whitespace-nowrap text-slate-500">{log.date}</td>
+                                  <td className="px-6 py-4 font-black text-sm whitespace-nowrap">{log.clientName}</td>
+                                  <td className="px-6 py-4 text-sm text-slate-600">{log.description}</td>
+                                  <td className="px-6 py-4 text-center font-black text-indigo-600 text-sm">{log.billableHours.toFixed(1)}</td>
+                                  <td className="px-6 py-4 text-center font-black text-sm">₪{log.totalPrice.toLocaleString()}</td>
+                                  <td className="px-6 py-4 text-left">
+                                    <button
+                                      onClick={() => setLogs(prev => prev.filter(l => l.id !== log.id))}
+                                      className="text-slate-300 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40 rounded-xl p-2 transition-all"
+                                      title="מחיקה"
+                                      aria-label="מחיקה"
+                                    >
+                                      <LucideIcon name="Trash2" className="w-4 h-4" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                              {filteredLogs.length === 0 && (
+                                <tr>
+                                  <td className="px-6 py-8 text-center text-sm text-slate-500" colSpan="6">אין רשומות להצגה</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -672,63 +938,142 @@
 
               {activeTab === 'tasks' && (
                 <div className="animate-in">
-                  <div className="flex items-end justify-between gap-4 mb-4">
-                    <div>
-                      <h2 className="text-lg sm:text-xl font-black">צ'ק-ליסט</h2>
-                      <div className="text-sm text-slate-500 mt-1">רשימת משימות לפי לקוח</div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-                    <Card className="p-4 sm:p-5 lg:p-6">
-                      <div className="flex items-center justify-between gap-3 mb-4">
-                        <div className="font-black">משימות</div>
-                        <div className="text-xs text-slate-500">({filteredTasks.length})</div>
-                      </div>
-
-                      <div className="space-y-3">
-                        {filteredTasks.map(t => {
-                          const clientName = clients.find(c => c.id === t.clientId)?.name || 'ללא לקוח';
-                          return (
-                            <div key={t.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="font-black text-sm truncate">{t.description}</div>
-                                  <div className="text-xs text-slate-500 mt-1">{clientName} - {t.date}</div>
-                                </div>
-                                <div className="text-[11px] font-black px-2 py-1 rounded-xl bg-white border border-slate-200 text-slate-700 whitespace-nowrap">
-                                  {t.status}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {filteredTasks.length === 0 && (
-                          <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">
-                            אין משימות להצגה
-                          </div>
-                        )}
-                      </div>
-                    </Card>
-
-                    <Card className="p-4 sm:p-5 lg:p-6">
-                      <div className="font-black mb-2">פילטר לפי לקוח</div>
-                      <div className="text-sm text-slate-500 mb-4">זה ישפיע גם על יומן העבודה והלקוחות בהמשך אם תרצה</div>
-
+                  <SectionHeader
+                    title="צ'ק-ליסט"
+                    subtitle="ניהול משימות עם היררכיה, שליטה ותצוגת פרטים"
+                    right={
                       <select
-                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                        className="w-full sm:w-auto bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
                         value={filterClient}
                         onChange={(e) => setFilterClient(e.target.value)}
+                        title="פילטר לקוח"
                       >
                         <option value="all">כל הלקוחות</option>
                         {clients.map(c => (
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                       </select>
+                    }
+                  />
 
-                      <div className="mt-6 p-4 rounded-2xl border border-slate-200 bg-slate-50 text-xs text-slate-600 leading-relaxed">
-                        רמז UX: אם אתה משתמש הרבה בפילטרים, אפשר להוסיף גם חיפוש. נכניס את זה בשלב הבא אם תרצה.
+                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                    <Card className="p-4 sm:p-5 lg:p-6 xl:col-span-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                        <div className="font-black">משימות</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Button
+                            variant={taskFilter === 'all' ? 'primary' : 'pill'}
+                            size="sm"
+                            className={cx(taskFilter === 'all' ? 'font-black' : 'font-normal')}
+                            onClick={() => setTaskFilter('all')}
+                            title="הכול"
+                          >
+                            הכול ({taskCounts.all})
+                          </Button>
+                          <Button
+                            variant={taskFilter === 'waiting' ? 'primary' : 'pill'}
+                            size="sm"
+                            className={cx(taskFilter === 'waiting' ? 'font-black' : 'font-normal')}
+                            onClick={() => setTaskFilter('waiting')}
+                            title="ממתין לי"
+                          >
+                            ממתין לי ({taskCounts.waiting})
+                          </Button>
+                          <Button
+                            variant={taskFilter === 'done' ? 'primary' : 'pill'}
+                            size="sm"
+                            className={cx(taskFilter === 'done' ? 'font-black' : 'font-normal')}
+                            onClick={() => setTaskFilter('done')}
+                            title="בוצעו"
+                          >
+                            בוצעו ({taskCounts.done})
+                          </Button>
+                          <Button
+                            variant={taskFilter === 'other' ? 'primary' : 'pill'}
+                            size="sm"
+                            className={cx(taskFilter === 'other' ? 'font-black' : 'font-normal')}
+                            onClick={() => setTaskFilter('other')}
+                            title="אחר"
+                            disabled={taskCounts.other === 0}
+                          >
+                            אחר ({taskCounts.other})
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        {taskFilter === 'all' && (
+                          <>
+                            <div className="p-3 rounded-2xl bg-amber-50 border border-amber-100">
+                              <div className="text-xs font-black text-amber-700">ממתין לי ({taskCounts.waiting})</div>
+                            </div>
+                            <div className="space-y-3">
+                              {taskGroups.waiting.map(t => <TaskItem key={t.id} t={t} />)}
+                              {taskGroups.waiting.length === 0 && (
+                                <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות שממתינות לך</div>
+                              )}
+                            </div>
+
+                            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 mt-4">
+                              <div className="text-xs font-black text-slate-700">אחר ({taskCounts.other})</div>
+                            </div>
+                            <div className="space-y-3">
+                              {taskGroups.other.map(t => <TaskItem key={t.id} t={t} />)}
+                              {taskGroups.other.length === 0 && (
+                                <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות נוספות</div>
+                              )}
+                            </div>
+
+                            <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100 mt-4">
+                              <div className="text-xs font-black text-emerald-700">בוצעו ({taskCounts.done})</div>
+                            </div>
+                            <div className="space-y-3">
+                              {taskGroups.done.map(t => <TaskItem key={t.id} t={t} />)}
+                              {taskGroups.done.length === 0 && (
+                                <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות שבוצעו</div>
+                              )}
+                            </div>
+                          </>
+                        )}
+
+                        {taskFilter !== 'all' && (
+                          <>
+                            {visibleTasks.map(t => <TaskItem key={t.id} t={t} />)}
+                            {visibleTasks.length === 0 && (
+                              <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות להצגה</div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </Card>
+
+                    <Card className="p-4 sm:p-5 lg:p-6">
+                      <div className="font-black mb-2">שליטה בתצוגה</div>
+                      <div className="text-sm text-slate-500 mb-4">פילטר לקוח משפיע גם על יומן העבודה והלקוחות</div>
+
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
+                        טיפ UX: משימות הן לחיצות. אפשר לפתוח כרטיס פרטים ולנהל סטטוס בלי לעבור לשוניות.
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-1 gap-3">
+                        <Button
+                          variant="secondary"
+                          size="lg"
+                          className="w-full font-black"
+                          onClick={() => setActiveTabWithHistory('logs')}
+                          title="חזרה ליומן עבודה"
+                        >
+                          <LucideIcon name="ClipboardList" className="w-4 h-4" /> מעבר ליומן עבודה
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="lg"
+                          className="w-full font-black"
+                          onClick={() => setActiveTabWithHistory('clients')}
+                          title="ניהול לקוחות"
+                        >
+                          <LucideIcon name="Users" className="w-4 h-4" /> מעבר ללקוחות
+                        </Button>
                       </div>
                     </Card>
                   </div>
@@ -737,15 +1082,24 @@
 
               {activeTab === 'clients' && (
                 <div className="animate-in">
-                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
-                    <div>
-                      <h2 className="text-lg sm:text-xl font-black">לקוחות</h2>
-                      <div className="text-sm text-slate-500 mt-1">ניהול לקוחות ותנאי חיוב</div>
-                    </div>
-                  </div>
+                  <SectionHeader
+                    title="לקוחות"
+                    subtitle="ניהול לקוחות ותנאי חיוב"
+                    right={
+                      <Button
+                        variant="primary"
+                        size="md"
+                        className="font-black"
+                        onClick={() => openAddClient('none')}
+                        title="הוספת לקוח חדש"
+                      >
+                        <LucideIcon name="Plus" className="w-4 h-4" /> הוספת לקוח
+                      </Button>
+                    }
+                  />
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-                    <div className="lg:col-span-2 space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
+                    <div className="lg:col-span-2 xl:col-span-3 space-y-4">
                       {/* Mobile cards */}
                       <div className="md:hidden space-y-3">
                         {clients.map(c => (
@@ -753,16 +1107,15 @@
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="font-black text-sm truncate">{c.name}</div>
-                                <div className="text-xs text-slate-500 mt-1">₪{c.rate}/שעה - {c.terms}</div>
+                                <div className="text-sm text-slate-500 mt-1">₪{c.rate}/שעה - {c.terms}</div>
                               </div>
-                              <div className="text-xs font-black px-2 py-1 rounded-xl bg-slate-50 border border-slate-200 whitespace-nowrap">
+                              <div className="text-sm font-black px-2 py-1.5 rounded-xl bg-slate-50 border border-slate-200 whitespace-nowrap">
                                 רף ₪{Number(c.threshold).toLocaleString()}
                               </div>
                             </div>
                           </Card>
                         ))}
 
-                        {/* Add client at end of list (requested) */}
                         <button
                           onClick={() => openAddClient('none')}
                           className="w-full p-4 sm:p-5 rounded-[1.5rem] border-2 border-dashed border-slate-300 bg-white hover:bg-slate-50 transition-all text-right focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50"
@@ -771,7 +1124,7 @@
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <div className="font-black">הוספת לקוח חדש</div>
-                              <div className="text-xs text-slate-500 mt-1">מוסיף לקוח לרשימה ומאפשר בחירה מהירה בדיווח עבודה</div>
+                              <div className="text-sm text-slate-500 mt-1">מוסיף לקוח לרשימה ומאפשר בחירה מהירה בדיווח עבודה</div>
                             </div>
                             <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
                               <LucideIcon name="Plus" className="w-5 h-5" />
@@ -783,7 +1136,7 @@
                       {/* Desktop table */}
                       <div className="hidden md:block bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden">
                         <div className="overflow-x-auto custom-scroll">
-                          <table className="w-full text-right min-w-[720px]">
+                          <table className="w-full text-right">
                             <thead className="bg-slate-50 text-[10px] uppercase font-black text-slate-400 tracking-widest border-b">
                               <tr>
                                 <th className="px-6 py-4">לקוח</th>
@@ -802,7 +1155,6 @@
                                 </tr>
                               ))}
 
-                              {/* Add client row at end of list (requested) */}
                               <tr>
                                 <td colSpan="4" className="px-6 py-5">
                                   <button
@@ -813,7 +1165,7 @@
                                     <div className="flex items-center justify-between gap-3">
                                       <div>
                                         <div className="font-black">הוספת לקוח חדש</div>
-                                        <div className="text-xs text-slate-500 mt-1">מוסיף לקוח לרשימה ומאפשר בחירה מהירה מכל מקום</div>
+                                        <div className="text-sm text-slate-500 mt-1">מוסיף לקוח לרשימה ומאפשר בחירה מהירה מכל מקום</div>
                                       </div>
                                       <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
                                         <LucideIcon name="Plus" className="w-5 h-5" />
@@ -846,7 +1198,7 @@
                       <Card className="p-4 sm:p-5 lg:p-6">
                         <div className="font-black mb-3">טיפ UX</div>
                         <div className="text-sm text-slate-600 leading-relaxed">
-                          כדי לחסוך זמן, הוספת לקוח זמינה גם מתוך הדרופדאון בדיווח עבודה.
+                          הוספת לקוח זמינה גם מתוך הדרופדאון בדיווח עבודה. אפשר להוסיף לקוח תוך כדי עבודה בלי לצאת מהמסך.
                         </div>
                       </Card>
                     </div>
@@ -903,28 +1255,132 @@
               </div>
 
               <div className="space-y-2">
-                <label className="text-[11px] font-black text-slate-500">תנאי תשלום / הערה</label>
-                <input
+                <label className="text-[11px] font-black text-slate-500">תנאי תשלום</label>
+                <select
                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                  value={clientForm.terms}
-                  onChange={(e) => setClientForm(p => ({ ...p, terms: e.target.value }))}
-                  placeholder="לדוגמה: שוטף 30 / בנק שעות"
-                />
+                  value={clientForm.termsPreset}
+                  onChange={(e) => setClientForm(p => ({ ...p, termsPreset: e.target.value }))}
+                >
+                  {TERMS_PRESETS.map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                  <option value="__custom__">אחר (הקלדה)</option>
+                </select>
+
+                {clientForm.termsPreset === '__custom__' && (
+                  <input
+                    className="w-full mt-2 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                    value={clientForm.termsCustom}
+                    onChange={(e) => setClientForm(p => ({ ...p, termsCustom: e.target.value }))}
+                    placeholder="כתוב תנאי תשלום מותאמים"
+                  />
+                )}
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                <Button type="submit" variant="primary" size="lg" className="w-full sm:w-auto">
+                <Button type="submit" variant="primary" size="lg" className="w-full sm:w-auto font-black">
                   <LucideIcon name="Check" className="w-4 h-4" /> שמירה
                 </Button>
-                <Button type="button" variant="secondary" size="lg" className="w-full sm:w-auto" onClick={closeAddClient}>
+                <Button type="button" variant="secondary" size="lg" className="w-full sm:w-auto font-black" onClick={closeAddClient}>
                   ביטול
                 </Button>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed">
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
                 אם פתחת את הטופס מתוך דיווח עבודה, הלקוח החדש ייבחר אוטומטית בשדה הלקוח.
               </div>
             </form>
+          </Modal>
+
+          <Modal
+            open={Boolean(taskDetailsId)}
+            title={selectedTask ? 'פרטי משימה' : 'פרטי משימה'}
+            onClose={closeTaskDetails}
+          >
+            {!selectedTask ? (
+              <div className="text-sm text-slate-500">לא נמצאה משימה</div>
+            ) : (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                  <div className="font-black text-base sm:text-lg">{selectedTask.description}</div>
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                      <span className="text-slate-500 font-bold">לקוח</span>
+                      <span className="font-black">{clientNameById(selectedTask.clientId)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                      <span className="text-slate-500 font-bold">תאריך</span>
+                      <span className="font-mono text-slate-700">{selectedTask.date || 'ללא תאריך'}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                      <span className="text-slate-500 font-bold">סטטוס</span>
+                      <span className="font-black">{selectedTask.status}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                      <span className="text-slate-500 font-bold">פעולות</span>
+                      <span className="text-slate-400">עדכון / מחיקה</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black text-slate-500">פירוט / הערות</label>
+                  <textarea
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                    rows="4"
+                    placeholder="הוסף פירוט שיעזור לך לזכור מה צריך לקרות"
+                    value={selectedTask.notes || ''}
+                    onChange={(e) => updateTask(selectedTask.id, { notes: e.target.value })}
+                  />
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                  <Button
+                    variant="subtle"
+                    size="lg"
+                    className="w-full sm:w-auto font-black"
+                    onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.WAITING })}
+                    title="העבר ל-ממתין לי"
+                  >
+                    <LucideIcon name="Clock" className="w-4 h-4" /> ממתין לי
+                  </Button>
+
+                  <Button
+                    variant="subtle"
+                    size="lg"
+                    className="w-full sm:w-auto font-black"
+                    onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.TODO })}
+                    title="העבר ל-לביצוע"
+                  >
+                    <LucideIcon name="ListTodo" className="w-4 h-4" /> לביצוע
+                  </Button>
+
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    className="w-full sm:w-auto font-black"
+                    onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.DONE })}
+                    title="סמן כבוצע"
+                  >
+                    <LucideIcon name="Check" className="w-4 h-4" /> בוצע
+                  </Button>
+
+                  <Button
+                    variant="danger"
+                    size="lg"
+                    className="w-full sm:w-auto font-black"
+                    onClick={() => deleteTask(selectedTask.id)}
+                    title="מחיקה"
+                  >
+                    <LucideIcon name="Trash2" className="w-4 h-4" /> מחיקה
+                  </Button>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
+                  ניווט: אפשר להשתמש בכפתור "חזרה" בהאדר כדי לחזור למסך הקודם בלי לבחור טאבים.
+                </div>
+              </div>
+            )}
           </Modal>
         </div>
       );
