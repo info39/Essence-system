@@ -23,7 +23,7 @@
     };
   </script>
 
-  <!-- Noto Sans Hebrew New Font -->
+  <!-- Noto Sans Hebrew Font (closest available to "Noto Sans Hebrew New") -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@100..900&display=swap" rel="stylesheet" />
@@ -60,20 +60,7 @@
   <script type="text/babel">
     const { useState, useMemo, useEffect, useRef } = React;
 
-    /** --- DESIGN SYSTEM & API CONFIG --- */
-    const DS = {
-      colors: {
-        primary: "bg-indigo-600",
-        primaryHover: "hover:bg-indigo-700",
-        status: {
-          unpaid: "bg-slate-100 text-slate-500",
-          pending: "bg-amber-100 text-amber-700",
-          paid: "bg-emerald-100 text-emerald-700",
-          danger: "bg-red-50 text-red-600 border-red-100"
-        }
-      }
-    };
-
+    /** --- API CONFIG --- */
     const apiKey = ""; // client-side key is not recommended for production
     const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
 
@@ -106,12 +93,7 @@
       return callApi();
     };
 
-    /**
-     * --- LUCIDE ICONS ---
-     * Robust rendering strategy:
-     * 1) Prefer lucide.createElement(name, attrs)
-     * 2) Fallback to data-lucide + lucide.createIcons()
-     */
+    /** --- LUCIDE ICONS --- */
     const LucideIcon = ({ name, className = "w-4 h-4" }) => {
       const ref = useRef(null);
 
@@ -149,8 +131,208 @@
       return <span ref={ref} className="inline-flex items-center justify-center shrink-0 leading-none" />;
     };
 
+    /** --- UTILS --- */
+    const cx = (...classes) => classes.filter(Boolean).join(' ');
+
+    const TERMS_PRESETS = [
+      'שוטף 15',
+      'שוטף 30',
+      'שוטף 45',
+      'שוטף 60',
+      'תשלום מראש',
+      'מקדמה 50% + יתרה בסיום',
+      'בנק שעות',
+      'ריטיינר חודשי',
+      'כרטיס אשראי',
+      'העברה בנקאית'
+    ];
+
+    const VENDOR_ROLE_PRESETS = [
+      'UI Designer',
+      'UX Designer',
+      'Brand Designer',
+      'Motion / Video',
+      'Copywriter',
+      'Dev WordPress / Elementor',
+      'Frontend',
+      'QA',
+      'Automation / No-Code',
+      'אחר'
+    ];
+
+    const PRICING_MODEL = {
+      HOURLY: 'hourly',
+      FIXED: 'fixed'
+    };
+
+    const PRICING_LABEL = {
+      hourly: 'שעתי',
+      fixed: 'פיקס'
+    };
+
+    const CONTACT_TYPE = {
+      CLIENT: 'client',
+      VENDOR: 'vendor'
+    };
+
+    const CONTACT_TYPE_LABEL = {
+      client: 'לקוח',
+      vendor: 'נותן שירות'
+    };
+
+    const TASK_STATUS = {
+      WAITING_ME: 'ממתין לי',
+      TODO: 'לביצוע',
+      UNASSIGNED: 'להקצאה',
+      IN_PROGRESS: 'ממתין לביצוע',
+      NEED_APPROVAL: 'ממתין לי לאישור',
+      DONE: 'בוצע'
+    };
+
+    const TASK_STATUS_OPTIONS = [
+      TASK_STATUS.WAITING_ME,
+      TASK_STATUS.TODO,
+      TASK_STATUS.UNASSIGNED,
+      TASK_STATUS.IN_PROGRESS,
+      TASK_STATUS.NEED_APPROVAL,
+      TASK_STATUS.DONE
+    ];
+
+    const BILLING_RECORD_KIND = {
+      INVOICE: 'invoice',
+      REMINDER: 'reminder'
+    };
+
+    const BILLING_RECORD_KIND_LABEL = {
+      invoice: 'חשבונית עתידית',
+      reminder: 'תזכורת'
+    };
+
+    const BILLING_RECORD_STATUS = {
+      SCHEDULED: 'מתוזמן',
+      SENT: 'נשלח',
+      PAID: 'שולם'
+    };
+
+    const money = (n) => {
+      const v = Number(n) || 0;
+      return Math.round(v * 100) / 100;
+    };
+
+    const parseNum = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const calculateBillableHoursFromMinutes = (minutes) => {
+      if (!minutes || minutes <= 0) return 0;
+      return Math.max(0.5, Math.ceil(minutes / 30) * 0.5);
+    };
+
+    const groupTasksByStatus = (tasks) => {
+      const waiting = [];
+      const done = [];
+      const other = [];
+
+      for (const t of tasks) {
+        if (t.status === TASK_STATUS.WAITING_ME || t.status === TASK_STATUS.NEED_APPROVAL) waiting.push(t);
+        else if (t.status === TASK_STATUS.DONE) done.push(t);
+        else other.push(t);
+      }
+
+      const sortByDateDesc = (a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : 0;
+        const db = b.date ? new Date(b.date).getTime() : 0;
+        return db - da;
+      };
+
+      waiting.sort(sortByDateDesc);
+      done.sort(sortByDateDesc);
+      other.sort(sortByDateDesc);
+
+      return { waiting, done, other };
+    };
+
+    const getContactById = (contacts, id) => contacts.find(c => c.id === id) || null;
+
+    const computeTaskFinancials = (task, contacts) => {
+      const client = task.clientId ? getContactById(contacts, task.clientId) : null;
+      const vendor = (task.assigneeType === 'vendor' && task.assigneeId) ? getContactById(contacts, task.assigneeId) : null;
+
+      const estH = money(task.estHours);
+      const actH = money(task.actualHours);
+
+      // Revenue side (your work)
+      let estRevenue = 0;
+      let revenue = 0;
+
+      if (task.assigneeType === 'me') {
+        if (task.pricingModel === PRICING_MODEL.HOURLY) {
+          const rate = client?.rate || 0;
+          estRevenue = money(estH * rate);
+          revenue = money(actH * rate);
+        } else {
+          const amt = money(task.fixedAmount);
+          estRevenue = amt;
+          revenue = amt;
+        }
+      }
+
+      // Cost side (vendor)
+      let estCost = 0;
+      let cost = 0;
+
+      if (task.assigneeType === 'vendor') {
+        if (task.pricingModel === PRICING_MODEL.HOURLY) {
+          const rate = vendor?.hourlyRate || 0;
+          estCost = money(estH * rate);
+          cost = money(actH * rate);
+        } else {
+          const amt = money(task.fixedAmount);
+          estCost = amt;
+          cost = amt;
+        }
+      }
+
+      return {
+        client,
+        vendor,
+        estRevenue,
+        revenue,
+        estCost,
+        cost,
+        estMargin: money(estRevenue - estCost),
+        margin: money(revenue - cost)
+      };
+    };
+
+    const computeClientTotals = (tasks, contacts, clientId) => {
+      let estRevenue = 0;
+      let revenue = 0;
+      let estCost = 0;
+      let cost = 0;
+
+      for (const t of tasks) {
+        if (t.clientId !== clientId) continue;
+        const f = computeTaskFinancials(t, contacts);
+        estRevenue += f.estRevenue;
+        revenue += f.revenue;
+        estCost += f.estCost;
+        cost += f.cost;
+      }
+
+      return {
+        estRevenue: money(estRevenue),
+        revenue: money(revenue),
+        estCost: money(estCost),
+        cost: money(cost),
+        estMargin: money(estRevenue - estCost),
+        margin: money(revenue - cost)
+      };
+    };
+
     /** --- SIMPLE RUNTIME TESTS (NO UI IMPACT) --- */
-    const runSelfTests = ({ calculateBillableHours, groupTasksByStatus }) => {
+    const runSelfTests = () => {
       const bhTests = [
         { in: 0, out: 0 },
         { in: -10, out: 0 },
@@ -166,70 +348,37 @@
 
       const bhFailures = [];
       for (const t of bhTests) {
-        const got = calculateBillableHours(t.in);
+        const got = calculateBillableHoursFromMinutes(t.in);
         if (got !== t.out) bhFailures.push({ input: t.in, expected: t.out, got });
       }
 
       const group = groupTasksByStatus([
-        { id: 'a', status: 'ממתין לי' },
-        { id: 'b', status: 'בוצע' },
-        { id: 'c', status: 'לביצוע' }
+        { id: 'a', status: TASK_STATUS.WAITING_ME },
+        { id: 'b', status: TASK_STATUS.DONE },
+        { id: 'c', status: TASK_STATUS.TODO },
+        { id: 'd', status: TASK_STATUS.NEED_APPROVAL }
       ]);
+      const groupOk = (group.waiting.length === 2 && group.done.length === 1 && group.other.length === 1);
 
-      const groupOk = (group.waiting.length === 1 && group.done.length === 1 && group.other.length === 1);
+      // financial tests
+      const testContacts = [
+        { id: 'c1', type: CONTACT_TYPE.CLIENT, name: 'לקוח 1', rate: 200, threshold: 1000, terms: 'שוטף 30' },
+        { id: 'v1', type: CONTACT_TYPE.VENDOR, name: 'פרילנסר 1', role: 'UI Designer', pricingDefault: PRICING_MODEL.HOURLY, hourlyRate: 120, fixedDefault: 0 }
+      ];
+      const testTasks = [
+        { id: 'tA', clientId: 'c1', assigneeType: 'me', assigneeId: null, description: 'משימה שלי', status: TASK_STATUS.TODO, date: '2026-01-01', notes: '', pricingModel: PRICING_MODEL.HOURLY, estHours: 2, actualHours: 3, fixedAmount: 0, billingPlan: null },
+        { id: 'tB', clientId: 'c1', assigneeType: 'vendor', assigneeId: 'v1', description: 'משימה לפרילנסר', status: TASK_STATUS.IN_PROGRESS, date: '2026-01-02', notes: '', pricingModel: PRICING_MODEL.HOURLY, estHours: 1, actualHours: 2, fixedAmount: 0, billingPlan: null }
+      ];
+      const totals = computeClientTotals(testTasks, testContacts, 'c1');
+      const expectedRevenue = 3 * 200;
+      const expectedCost = 2 * 120;
+      const financialOk = (totals.revenue === expectedRevenue && totals.cost === expectedCost && totals.margin === (expectedRevenue - expectedCost));
 
-      if (bhFailures.length || !groupOk) {
-        console.error('[Studio OS Tests] FAILED', { bhFailures, group });
+      if (bhFailures.length || !groupOk || !financialOk) {
+        console.error('[Studio OS Tests] FAILED', { bhFailures, group, totals, expectedRevenue, expectedCost });
       } else {
         console.info('[Studio OS Tests] PASSED');
       }
-    };
-
-    /** --- UTILS --- */
-    const cx = (...classes) => classes.filter(Boolean).join(' ');
-
-    const TASK_STATUS = {
-      WAITING: 'ממתין לי',
-      DONE: 'בוצע',
-      TODO: 'לביצוע'
-    };
-
-    const TERMS_PRESETS = [
-      'שוטף 15',
-      'שוטף 30',
-      'שוטף 45',
-      'שוטף 60',
-      'תשלום מראש',
-      'מקדמה 50% + יתרה בסיום',
-      'בנק שעות',
-      'ריטיינר חודשי',
-      'כרטיס אשראי',
-      'העברה בנקאית'
-    ];
-
-    const groupTasksByStatus = (tasks) => {
-      const waiting = [];
-      const done = [];
-      const other = [];
-
-      for (const t of tasks) {
-        if (t.status === TASK_STATUS.WAITING) waiting.push(t);
-        else if (t.status === TASK_STATUS.DONE) done.push(t);
-        else other.push(t);
-      }
-
-      // newest first by date if available
-      const sortByDateDesc = (a, b) => {
-        const da = a.date ? new Date(a.date).getTime() : 0;
-        const db = b.date ? new Date(b.date).getTime() : 0;
-        return db - da;
-      };
-
-      waiting.sort(sortByDateDesc);
-      done.sort(sortByDateDesc);
-      other.sort(sortByDateDesc);
-
-      return { waiting, done, other };
     };
 
     /** --- UI PRIMITIVES --- */
@@ -299,15 +448,13 @@
         <div className="fixed inset-0 z-[100]">
           <div className="absolute inset-0 bg-slate-950/50" onClick={onClose} />
           <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-6">
-            <div className="w-full max-w-2xl bg-white rounded-[1.5rem] shadow-soft border border-slate-200 overflow-hidden">
+            <div className="w-full max-w-3xl bg-white rounded-[1.5rem] shadow-soft border border-slate-200 overflow-hidden">
               <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm sm:text-base font-black truncate">{title}</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">אפשר לסגור עם ESC</div>
                 </div>
-                <Button variant="secondary" size="sm" onClick={onClose}>
-                  סגירה
-                </Button>
+                <Button variant="secondary" size="sm" onClick={onClose}>סגירה</Button>
               </div>
               <div className="p-5 sm:p-6">
                 {children}
@@ -332,10 +479,7 @@
       <Button
         variant={active ? 'primary' : 'ghost'}
         size="md"
-        className={cx(
-          "shrink-0 rounded-xl px-4 sm:px-5",
-          active ? "font-black" : "font-normal"
-        )}
+        className={cx("shrink-0 rounded-xl px-4 sm:px-5", active ? "font-black" : "font-normal")}
         onClick={onClick}
         title={title}
       >
@@ -343,148 +487,336 @@
       </Button>
     );
 
+    const FieldLabel = ({ children }) => (
+      <label className="text-[11px] font-black text-slate-500">{children}</label>
+    );
+
+    const Select = ({ value, onChange, children, className = "", required = false, title }) => (
+      <select
+        className={cx(
+          "w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold",
+          "focus:outline-none focus:ring-2 focus:ring-indigo-300/50",
+          className
+        )}
+        value={value}
+        onChange={onChange}
+        required={required}
+        title={title}
+      >
+        {children}
+      </select>
+    );
+
+    const Input = ({ value, onChange, type = "text", placeholder, min, className = "", required = false }) => (
+      <input
+        type={type}
+        min={min}
+        className={cx(
+          "w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm",
+          "focus:outline-none focus:ring-2 focus:ring-indigo-300/50",
+          className
+        )}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        required={required}
+      />
+    );
+
+    const Textarea = ({ value, onChange, rows = 3, placeholder }) => (
+      <textarea
+        className={cx(
+          "w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm",
+          "focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+        )}
+        rows={rows}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+      />
+    );
+
+    /** --- TASK ITEM (NO NESTED BUTTONS) --- */
+    const TaskItem = ({ task, contacts, onOpen, onQuickDone }) => {
+      const { client, vendor, estRevenue, revenue, estCost, cost } = computeTaskFinancials(task, contacts);
+
+      const isWaiting = (task.status === TASK_STATUS.WAITING_ME || task.status === TASK_STATUS.NEED_APPROVAL);
+      const isDone = (task.status === TASK_STATUS.DONE);
+
+      const badgeStyles = isDone
+        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+        : isWaiting
+          ? "bg-amber-50 text-amber-700 border-amber-100"
+          : "bg-slate-50 text-slate-700 border-slate-200";
+
+      const metaLeft = task.assigneeType === 'vendor'
+        ? `נותן שירות: ${vendor?.name || 'לא נבחר'}`
+        : 'בביצוע: אני';
+
+      const metaRight = client ? `לקוח: ${client.name}` : 'ללא שיוך לקוח';
+
+      const showMoney = Boolean(client || vendor);
+      const estLine = task.pricingModel === PRICING_MODEL.HOURLY
+        ? `הערכה: ${money(task.estHours).toLocaleString()} ש׳ | בפועל: ${money(task.actualHours).toLocaleString()} ש׳`
+        : `סכום: ₪${money(task.fixedAmount).toLocaleString()}`;
+
+      const moneyLine = task.assigneeType === 'me'
+        ? `הכנסה (בפועל): ₪${revenue.toLocaleString()} | הערכה: ₪${estRevenue.toLocaleString()}`
+        : `עלות (בפועל): ₪${cost.toLocaleString()} | הערכה: ₪${estCost.toLocaleString()}`;
+
+      return (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpen(task.id)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onOpen(task.id);
+            }
+          }}
+          className={cx(
+            "w-full text-right p-4 rounded-2xl border transition-all",
+            "bg-white border-slate-200 hover:bg-slate-50",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50",
+            "active:scale-[0.995]"
+          )}
+          title="לחץ לפרטי משימה"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-black text-sm sm:text-base truncate">{task.description}</div>
+              <div className="text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-bold">{metaRight}</span>
+                <span className="text-slate-300">-</span>
+                <span className="font-mono text-slate-700 text-base sm:text-base">{task.date || 'ללא תאריך'}</span>
+              </div>
+              <div className="text-xs text-slate-500 mt-1">{metaLeft}</div>
+            </div>
+            <div className={cx("text-[11px] sm:text-xs font-black px-2.5 py-1.5 rounded-xl border whitespace-nowrap", badgeStyles)}>
+              {task.status}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="text-xs text-slate-600">
+              <div className="font-bold">{estLine}</div>
+              {showMoney ? <div className="mt-1">{moneyLine}</div> : null}
+            </div>
+
+            <div className="flex items-center justify-between sm:justify-end gap-2">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onQuickDone(task.id);
+                }}
+                title="סמן כבוצע"
+              >
+                <LucideIcon name="Check" className="w-4 h-4" /> בוצע
+              </Button>
+
+              <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                <LucideIcon name="ChevronLeft" className="w-4 h-4" /> פרטים
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     /** --- MAIN APP --- */
     const App = () => {
       const [activeTab, setActiveTab] = useState('logs');
       const [tabHistory, setTabHistory] = useState([]);
 
-      const [clients, setClients] = useState([
-        { id: '1', name: 'סטודיו גלורי', rate: 250, threshold: 1500, terms: 'שוטף 30' },
-        { id: '2', name: 'טק-סולושנס', rate: 270, threshold: 800, terms: 'בנק שעות' }
+      // Contacts: clients + vendors (freelancers)
+      const [contacts, setContacts] = useState([
+        { id: '1', type: CONTACT_TYPE.CLIENT, name: 'סטודיו גלורי', rate: 250, threshold: 1500, terms: 'שוטף 30' },
+        { id: '2', type: CONTACT_TYPE.CLIENT, name: 'טק-סולושנס', rate: 270, threshold: 800, terms: 'בנק שעות' },
+        { id: 'v1', type: CONTACT_TYPE.VENDOR, name: 'נועה פרילנס', role: 'UI Designer', pricingDefault: PRICING_MODEL.HOURLY, hourlyRate: 160, fixedDefault: 0 }
       ]);
 
-      const [logs, setLogs] = useState([
-        { id: '101', date: '2023-11-20', clientId: '1', description: 'עיצוב סדרת פוסטים לקמפיין פייסבוק כולל סגירות לדפוס', minutes: 75, status: 'טרם חויב' },
-        { id: '102', date: '2023-11-21', clientId: '2', description: 'אופטימיזציה למנועי חיפוש ותיקון באגים ב-Checkout', minutes: 20, status: 'טרם חויב' }
-      ]);
+      const clients = useMemo(() => contacts.filter(c => c.type === CONTACT_TYPE.CLIENT), [contacts]);
+      const vendors = useMemo(() => contacts.filter(c => c.type === CONTACT_TYPE.VENDOR), [contacts]);
 
-      const [tasks, setTasks] = useState([
-        { id: 't1', clientId: '1', description: 'שיחת בירור לגבי קמפיין דצמבר', status: TASK_STATUS.WAITING, date: '2023-11-22', notes: '' },
-        { id: 't2', clientId: '2', description: 'בדיקת סטטוס תשלום ונעילת שעות לחודש', status: TASK_STATUS.TODO, date: '2023-11-24', notes: '' },
-        { id: 't3', clientId: '1', description: 'סיכום משימות ושיתוף מול הלקוח', status: TASK_STATUS.DONE, date: '2023-11-18', notes: '' }
-      ]);
-
+      // Shared client filter across screens
       const [filterClient, setFilterClient] = useState('all');
-      const [isAiLoading, setIsAiLoading] = useState(false);
-      const [aiResult, setAiResult] = useState(null);
+
+      // Work log: time entries for client work (hourly)
+      const [logs, setLogs] = useState([
+        { id: '101', date: '2026-01-08', clientId: '1', description: 'עיצוב סדרת פוסטים לקמפיין פייסבוק כולל סגירות לדפוס', minutes: 75, status: 'טרם חויב' },
+        { id: '102', date: '2026-01-09', clientId: '2', description: 'אופטימיזציה למנועי חיפוש ותיקון באגים ב-Checkout', minutes: 20, status: 'טרם חויב' }
+      ]);
+
+      // Tasks: both your tasks (revenue side) + vendor tasks (cost side)
+      const [tasks, setTasks] = useState([
+        {
+          id: 't1',
+          clientId: '1',
+          assigneeType: 'me',
+          assigneeId: null,
+          description: 'הכנת סיכום משימות ושיתוף מול הלקוח',
+          status: TASK_STATUS.WAITING_ME,
+          date: '2026-01-10',
+          notes: '',
+          pricingModel: PRICING_MODEL.HOURLY,
+          estHours: 1.5,
+          actualHours: 1.0,
+          fixedAmount: 0,
+          billingPlan: null
+        },
+        {
+          id: 't2',
+          clientId: '1',
+          assigneeType: 'vendor',
+          assigneeId: 'v1',
+          description: 'באנר למודעת רימרקטינג',
+          status: TASK_STATUS.IN_PROGRESS,
+          date: '2026-01-12',
+          notes: '',
+          pricingModel: PRICING_MODEL.FIXED,
+          estHours: 0,
+          actualHours: 0,
+          fixedAmount: 600,
+          billingPlan: null
+        },
+        {
+          id: 't3',
+          clientId: '2',
+          assigneeType: 'me',
+          assigneeId: null,
+          description: 'דף נחיתה לקורס חדש - שלד ותכנים',
+          status: TASK_STATUS.TODO,
+          date: '2026-01-15',
+          notes: '',
+          pricingModel: PRICING_MODEL.FIXED,
+          estHours: 0,
+          actualHours: 0,
+          fixedAmount: 4200,
+          billingPlan: {
+            enabled: true,
+            kind: BILLING_RECORD_KIND.INVOICE,
+            dueDate: '2026-02-01',
+            amount: 4200
+          }
+        }
+      ]);
+
+      // Future billing records (client-side): invoices/reminders
+      const [billingRecords, setBillingRecords] = useState([
+        { id: 'b1', kind: BILLING_RECORD_KIND.INVOICE, status: BILLING_RECORD_STATUS.SCHEDULED, clientId: '2', taskId: 't3', dueDate: '2026-02-01', amount: 4200 }
+      ]);
+
+      // AI helpers
       const [isAiPolishing, setIsAiPolishing] = useState(false);
 
-      // Add Client Modal state
-      const [isAddClientOpen, setIsAddClientOpen] = useState(false);
-      const [addClientContext, setAddClientContext] = useState('none'); // 'none' | 'log'
-      const [clientForm, setClientForm] = useState({
-        name: '',
-        rate: 250,
-        threshold: 1000,
-        termsPreset: 'שוטף 30',
-        termsCustom: ''
-      });
+      // Navigation / modals
+      const [isAddContactOpen, setIsAddContactOpen] = useState(false);
+      const [addContactContext, setAddContactContext] = useState({ source: 'none', field: 'none' });
 
-      // Task details modal
       const [taskDetailsId, setTaskDetailsId] = useState(null);
       const selectedTask = useMemo(() => tasks.find(t => t.id === taskDetailsId) || null, [tasks, taskDetailsId]);
 
-      const [taskFilter, setTaskFilter] = useState('all'); // all | waiting | done | other
-
-      const [newLog, setNewLog] = useState({
-        clientId: '',
-        description: '',
-        minutes: '',
-        date: new Date().toISOString().split('T')[0]
-      });
-
-      const calculateBillableHours = (minutes) => {
-        if (!minutes || minutes <= 0) return 0;
-        return Math.max(0.5, Math.ceil(minutes / 30) * 0.5);
+      const setActiveTabWithHistory = (nextTab) => {
+        if (nextTab === activeTab) return;
+        setTabHistory(prev => [...prev, activeTab]);
+        setActiveTab(nextTab);
       };
 
-      useEffect(() => {
-        runSelfTests({ calculateBillableHours, groupTasksByStatus });
-      }, []);
+      const canGoBack = Boolean(taskDetailsId || isAddContactOpen || tabHistory.length > 0);
 
-      const processedLogs = useMemo(() => {
-        return logs
-          .map(log => {
-            const client = clients.find(c => c.id === log.clientId) || {};
-            const billableHours = calculateBillableHours(log.minutes);
-            return {
-              ...log,
-              clientName: client.name || 'לקוח הוסר',
-              rate: client.rate || 0,
-              billableHours,
-              totalPrice: billableHours * (client.rate || 0)
-            };
-          })
-          .sort((a, b) => new Date(b.date) - new Date(a.date));
-      }, [logs, clients]);
-
-      const clientSummaries = useMemo(() => {
-        return clients.map(client => {
-          const unpaidLogs = processedLogs.filter(l => l.clientId === client.id && l.status !== 'שולם');
-          const totalUnpaid = unpaidLogs.reduce((sum, log) => sum + log.totalPrice, 0);
-          return {
-            ...client,
-            totalUnpaid,
-            isOverThreshold: totalUnpaid >= client.threshold,
-            unpaidCount: unpaidLogs.length
-          };
+      const handleBack = () => {
+        if (taskDetailsId) {
+          setTaskDetailsId(null);
+          return;
+        }
+        if (isAddContactOpen) {
+          setIsAddContactOpen(false);
+          setAddContactContext({ source: 'none', field: 'none' });
+          return;
+        }
+        setTabHistory(prev => {
+          if (!prev.length) return prev;
+          const copy = [...prev];
+          const last = copy.pop();
+          setActiveTab(last);
+          return copy;
         });
-      }, [processedLogs, clients]);
-
-      const openAddClient = (context = 'none') => {
-        setAddClientContext(context);
-        setClientForm({ name: '', rate: 250, threshold: 1000, termsPreset: 'שוטף 30', termsCustom: '' });
-        setIsAddClientOpen(true);
       };
 
-      const closeAddClient = () => {
-        setIsAddClientOpen(false);
-        setAddClientContext('none');
+      const openAddContact = ({ source, field, desiredType }) => {
+        setAddContactContext({ source, field, desiredType });
+        setContactForm((prev) => ({
+          ...prev,
+          type: desiredType || CONTACT_TYPE.CLIENT,
+          name: '',
+          // client defaults
+          rate: 250,
+          threshold: 1000,
+          termsPreset: 'שוטף 30',
+          termsCustom: '',
+          // vendor defaults
+          role: 'UI Designer',
+          pricingDefault: PRICING_MODEL.HOURLY,
+          hourlyRate: 160,
+          fixedDefault: 0
+        }));
+        setIsAddContactOpen(true);
       };
 
-      const getFinalTerms = () => {
-        const preset = clientForm.termsPreset;
-        if (preset === '__custom__') {
-          const v = (clientForm.termsCustom || '').trim();
-          return v || 'אחר';
-        }
-        return preset || 'שוטף 30';
+      const closeAddContact = () => {
+        setIsAddContactOpen(false);
+        setAddContactContext({ source: 'none', field: 'none' });
       };
 
-      const handleCreateClient = (e) => {
-        e.preventDefault();
-        const name = (clientForm.name || '').trim();
-        if (!name) return;
+      const openTaskDetails = (id) => setTaskDetailsId(id);
+      const closeTaskDetails = () => setTaskDetailsId(null);
 
-        const newClient = {
-          id: Date.now().toString(),
-          name,
-          rate: Number(clientForm.rate) || 0,
-          threshold: Number(clientForm.threshold) || 0,
-          terms: getFinalTerms()
-        };
-
-        setClients(prev => [...prev, newClient]);
-
-        // UX: if the modal was opened from the log select, auto-select the new client
-        if (addClientContext === 'log') {
-          setNewLog(prev => ({ ...prev, clientId: newClient.id }));
-        }
-
-        closeAddClient();
+      const updateTask = (id, patch) => {
+        setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
       };
 
-      const handleAddLog = (e) => {
-        e.preventDefault();
-        const minutesInt = parseInt(newLog.minutes);
-        if (!newLog.clientId || !newLog.description || !minutesInt) return;
+      const deleteTask = (id) => {
+        setTasks(prev => prev.filter(t => t.id !== id));
+        setBillingRecords(prev => prev.filter(b => b.taskId !== id));
+        if (taskDetailsId === id) setTaskDetailsId(null);
+      };
 
-        setLogs(prev => [
-          { ...newLog, id: Date.now().toString(), status: 'טרם חויב', minutes: minutesInt },
-          ...prev
-        ]);
+      const upsertBillingFromTask = (task) => {
+        if (!task?.billingPlan?.enabled) return;
+        if (!task.clientId) return;
 
-        setNewLog(prev => ({ ...prev, description: '', minutes: '' }));
+        const amount = money(task.billingPlan.amount || 0);
+        const dueDate = task.billingPlan.dueDate;
+        if (!amount || !dueDate) return;
+
+        setBillingRecords(prev => {
+          const existing = prev.find(b => b.taskId === task.id && b.clientId === task.clientId);
+          if (existing) {
+            return prev.map(b => (b.id === existing.id ? {
+              ...b,
+              kind: task.billingPlan.kind,
+              amount,
+              dueDate,
+              status: b.status || BILLING_RECORD_STATUS.SCHEDULED
+            } : b));
+          }
+          return [
+            {
+              id: `b_${Date.now()}`,
+              kind: task.billingPlan.kind,
+              status: BILLING_RECORD_STATUS.SCHEDULED,
+              clientId: task.clientId,
+              taskId: task.id,
+              amount,
+              dueDate
+            },
+            ...prev
+          ];
+        });
       };
 
       const polishDescription = async (text, setter) => {
@@ -503,30 +835,13 @@
         }
       };
 
-      const filteredLogs = filterClient === 'all'
-        ? processedLogs
-        : processedLogs.filter(l => l.clientId === filterClient);
-
-      const filteredTasks = filterClient === 'all'
-        ? tasks
-        : tasks.filter(t => t.clientId === filterClient);
-
-      const taskGroups = useMemo(() => groupTasksByStatus(filteredTasks), [filteredTasks]);
-
-      const taskCounts = useMemo(() => ({
-        all: filteredTasks.length,
-        waiting: taskGroups.waiting.length,
-        done: taskGroups.done.length,
-        other: taskGroups.other.length
-      }), [filteredTasks.length, taskGroups]);
-
-      const visibleTasks = useMemo(() => {
-        if (taskFilter === 'waiting') return taskGroups.waiting;
-        if (taskFilter === 'done') return taskGroups.done;
-        if (taskFilter === 'other') return taskGroups.other;
-        // all = grouped view is handled in UI; here return all for convenience if needed
-        return filteredTasks;
-      }, [taskFilter, taskGroups, filteredTasks]);
+      // Add Log state
+      const [newLog, setNewLog] = useState({
+        clientId: '',
+        description: '',
+        minutes: '',
+        date: new Date().toISOString().split('T')[0]
+      });
 
       const isLogValid = Boolean(
         newLog.clientId &&
@@ -537,120 +852,341 @@
       const handleLogClientChange = (value) => {
         if (value === '__add_new__') {
           setNewLog(prev => ({ ...prev, clientId: '' }));
-          openAddClient('log');
+          openAddContact({ source: 'log', field: 'clientId', desiredType: CONTACT_TYPE.CLIENT });
           return;
         }
         setNewLog(prev => ({ ...prev, clientId: value }));
       };
 
-      const setActiveTabWithHistory = (nextTab) => {
-        if (nextTab === activeTab) return;
-        setTabHistory(prev => [...prev, activeTab]);
-        setActiveTab(nextTab);
+      const handleAddLog = (e) => {
+        e.preventDefault();
+        const minutesInt = parseInt(newLog.minutes);
+        if (!newLog.clientId || !newLog.description || !minutesInt) return;
+
+        setLogs(prev => [
+          { ...newLog, id: Date.now().toString(), status: 'טרם חויב', minutes: minutesInt },
+          ...prev
+        ]);
+
+        setNewLog(prev => ({ ...prev, description: '', minutes: '' }));
       };
 
-      const canGoBack = Boolean(taskDetailsId || isAddClientOpen || tabHistory.length > 0);
+      // Contact form
+      const [contactForm, setContactForm] = useState({
+        type: CONTACT_TYPE.CLIENT,
+        name: '',
+        // client
+        rate: 250,
+        threshold: 1000,
+        termsPreset: 'שוטף 30',
+        termsCustom: '',
+        // vendor
+        role: 'UI Designer',
+        pricingDefault: PRICING_MODEL.HOURLY,
+        hourlyRate: 160,
+        fixedDefault: 0
+      });
 
-      const handleBack = () => {
-        if (taskDetailsId) {
-          setTaskDetailsId(null);
-          return;
+      const getFinalTerms = () => {
+        const preset = contactForm.termsPreset;
+        if (preset === '__custom__') {
+          const v = (contactForm.termsCustom || '').trim();
+          return v || 'אחר';
         }
-        if (isAddClientOpen) {
-          closeAddClient();
-          return;
+        return preset || 'שוטף 30';
+      };
+
+      const handleCreateContact = (e) => {
+        e.preventDefault();
+        const name = (contactForm.name || '').trim();
+        if (!name) return;
+
+        const id = Date.now().toString();
+        const type = contactForm.type;
+
+        const newContact = (type === CONTACT_TYPE.CLIENT)
+          ? {
+              id,
+              type,
+              name,
+              rate: parseNum(contactForm.rate),
+              threshold: parseNum(contactForm.threshold),
+              terms: getFinalTerms()
+            }
+          : {
+              id,
+              type,
+              name,
+              role: contactForm.role || 'אחר',
+              pricingDefault: contactForm.pricingDefault,
+              hourlyRate: money(contactForm.hourlyRate),
+              fixedDefault: money(contactForm.fixedDefault)
+            };
+
+        setContacts(prev => [...prev, newContact]);
+
+        // Apply context (auto-select in the place the modal was opened from)
+        if (addContactContext.source === 'log' && addContactContext.field === 'clientId' && newContact.type === CONTACT_TYPE.CLIENT) {
+          setNewLog(prev => ({ ...prev, clientId: newContact.id }));
         }
-        setTabHistory(prev => {
-          if (!prev.length) return prev;
-          const copy = [...prev];
-          const last = copy.pop();
-          setActiveTab(last);
-          return copy;
+        if (addContactContext.source === 'task' && addContactContext.field === 'clientId' && newContact.type === CONTACT_TYPE.CLIENT) {
+          setNewTask(prev => ({ ...prev, clientId: newContact.id }));
+        }
+        if (addContactContext.source === 'task' && addContactContext.field === 'vendorId' && newContact.type === CONTACT_TYPE.VENDOR) {
+          setNewTask(prev => ({ ...prev, assigneeId: newContact.id }));
+        }
+
+        closeAddContact();
+      };
+
+      // Logs processed
+      const processedLogs = useMemo(() => {
+        return logs
+          .map(log => {
+            const client = getContactById(contacts, log.clientId);
+            const billableHours = calculateBillableHoursFromMinutes(log.minutes);
+            const rate = client?.type === CONTACT_TYPE.CLIENT ? (client.rate || 0) : 0;
+            return {
+              ...log,
+              clientName: client?.name || 'לקוח הוסר',
+              rate,
+              billableHours,
+              totalPrice: money(billableHours * rate)
+            };
+          })
+          .sort((a, b) => new Date(b.date) - new Date(a.date));
+      }, [logs, contacts]);
+
+      const clientSummaries = useMemo(() => {
+        return clients.map(client => {
+          const unpaidLogs = processedLogs.filter(l => l.clientId === client.id && l.status !== 'שולם');
+          const totalUnpaid = unpaidLogs.reduce((sum, log) => sum + log.totalPrice, 0);
+          return {
+            ...client,
+            totalUnpaid: money(totalUnpaid),
+            isOverThreshold: totalUnpaid >= (client.threshold || 0),
+            unpaidCount: unpaidLogs.length
+          };
         });
+      }, [processedLogs, clients]);
+
+      const filteredLogs = filterClient === 'all'
+        ? processedLogs
+        : processedLogs.filter(l => l.clientId === filterClient);
+
+      // Tasks filters
+      const [taskAssigneeView, setTaskAssigneeView] = useState('mine'); // mine | vendors
+      const [taskFilter, setTaskFilter] = useState('all'); // all | waiting | done | other
+
+      const tasksByClientFilter = useMemo(() => {
+        const base = (filterClient === 'all') ? tasks : tasks.filter(t => t.clientId === filterClient);
+        if (taskAssigneeView === 'mine') return base.filter(t => t.assigneeType === 'me');
+        return base.filter(t => t.assigneeType === 'vendor');
+      }, [tasks, filterClient, taskAssigneeView]);
+
+      const taskGroups = useMemo(() => groupTasksByStatus(tasksByClientFilter), [tasksByClientFilter]);
+
+      const taskCounts = useMemo(() => ({
+        all: tasksByClientFilter.length,
+        waiting: taskGroups.waiting.length,
+        done: taskGroups.done.length,
+        other: taskGroups.other.length
+      }), [tasksByClientFilter.length, taskGroups]);
+
+      const visibleTasks = useMemo(() => {
+        if (taskFilter === 'waiting') return taskGroups.waiting;
+        if (taskFilter === 'done') return taskGroups.done;
+        if (taskFilter === 'other') return taskGroups.other;
+        return tasksByClientFilter;
+      }, [taskFilter, taskGroups, tasksByClientFilter]);
+
+      // Financial summary per selected client (or overall)
+      const clientIdsForSummary = useMemo(() => {
+        if (filterClient !== 'all') return [filterClient];
+        // only clients that actually exist
+        return clients.map(c => c.id);
+      }, [filterClient, clients]);
+
+      const financialSummary = useMemo(() => {
+        let estRevenue = 0;
+        let revenue = 0;
+        let estCost = 0;
+        let cost = 0;
+
+        for (const cid of clientIdsForSummary) {
+          const totals = computeClientTotals(tasks, contacts, cid);
+          estRevenue += totals.estRevenue;
+          revenue += totals.revenue;
+          estCost += totals.estCost;
+          cost += totals.cost;
+        }
+
+        return {
+          estRevenue: money(estRevenue),
+          revenue: money(revenue),
+          estCost: money(estCost),
+          cost: money(cost),
+          estMargin: money(estRevenue - estCost),
+          margin: money(revenue - cost)
+        };
+      }, [clientIdsForSummary, tasks, contacts]);
+
+      // New task form
+      const [newTask, setNewTask] = useState({
+        description: '',
+        date: new Date().toISOString().split('T')[0],
+        status: TASK_STATUS.TODO,
+        assigneeType: 'me',
+        assigneeId: '', // vendorId when assigneeType=vendor
+        clientId: '',
+        pricingModel: PRICING_MODEL.HOURLY,
+        estHours: 1,
+        actualHours: 0,
+        fixedAmount: 0,
+        billingPlanEnabled: false,
+        billingPlanKind: BILLING_RECORD_KIND.INVOICE,
+        billingDueDate: '',
+        billingAmount: 0,
+        notes: ''
+      });
+
+      const handleNewTaskAssigneeChange = (value) => {
+        if (value === 'me') {
+          setNewTask(prev => ({ ...prev, assigneeType: 'me', assigneeId: '' }));
+        } else {
+          setNewTask(prev => ({ ...prev, assigneeType: 'vendor', status: TASK_STATUS.UNASSIGNED }));
+        }
       };
 
-      const clientNameById = (id) => clients.find(c => c.id === id)?.name || 'ללא לקוח';
-
-      const openTaskDetails = (id) => setTaskDetailsId(id);
-      const closeTaskDetails = () => setTaskDetailsId(null);
-
-      const updateTask = (id, patch) => {
-        setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
+      const handleNewTaskClientChange = (value) => {
+        if (value === '__add_new__') {
+          setNewTask(prev => ({ ...prev, clientId: '' }));
+          openAddContact({ source: 'task', field: 'clientId', desiredType: CONTACT_TYPE.CLIENT });
+          return;
+        }
+        setNewTask(prev => ({ ...prev, clientId: value }));
       };
 
-      const deleteTask = (id) => {
-        setTasks(prev => prev.filter(t => t.id !== id));
-        if (taskDetailsId === id) setTaskDetailsId(null);
+      const handleNewTaskVendorChange = (value) => {
+        if (value === '__add_new__') {
+          setNewTask(prev => ({ ...prev, assigneeId: '' }));
+          openAddContact({ source: 'task', field: 'vendorId', desiredType: CONTACT_TYPE.VENDOR });
+          return;
+        }
+        setNewTask(prev => ({ ...prev, assigneeId: value }));
       };
 
-      const TaskItem = ({ t }) => {
-        const clientName = clientNameById(t.clientId);
-        const statusStyles = t.status === TASK_STATUS.DONE
-          ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-          : t.status === TASK_STATUS.WAITING
-            ? "bg-amber-50 text-amber-700 border-amber-100"
-            : "bg-slate-50 text-slate-700 border-slate-200";
+      const selectedClientForNewTask = useMemo(() => newTask.clientId ? getContactById(contacts, newTask.clientId) : null, [newTask.clientId, contacts]);
+      const selectedVendorForNewTask = useMemo(() => (newTask.assigneeType === 'vendor' && newTask.assigneeId) ? getContactById(contacts, newTask.assigneeId) : null, [newTask.assigneeType, newTask.assigneeId, contacts]);
 
-        return (
-          <button
-            type="button"
-            onClick={() => openTaskDetails(t.id)}
-            className={cx(
-              "w-full text-right p-4 rounded-2xl border transition-all",
-              "bg-white border-slate-200 hover:bg-slate-50",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50",
-              "active:scale-[0.995]"
-            )}
-            title="לחץ לפרטי משימה"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-black text-sm sm:text-base truncate">{t.description}</div>
-                <div className="text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="font-bold">{clientName}</span>
-                  <span className="text-slate-300">-</span>
-                  <span className="font-mono text-slate-600">{t.date || 'ללא תאריך'}</span>
-                </div>
-              </div>
-              <div className={cx("text-[11px] sm:text-xs font-black px-2.5 py-1.5 rounded-xl border whitespace-nowrap", statusStyles)}>
-                {t.status}
-              </div>
-            </div>
+      const derivedNewTaskBillingAmount = useMemo(() => {
+        if (newTask.assigneeType !== 'me') return 0;
+        if (!selectedClientForNewTask || selectedClientForNewTask.type !== CONTACT_TYPE.CLIENT) return 0;
 
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <div className="text-xs text-slate-500 truncate">
-                {t.notes ? 'יש פירוט נוסף' : 'אין פירוט נוסף'}
-              </div>
+        if (newTask.pricingModel === PRICING_MODEL.FIXED) return money(newTask.fixedAmount);
+        // hourly
+        const est = money(newTask.estHours) * (selectedClientForNewTask.rate || 0);
+        return money(est);
+      }, [newTask.assigneeType, newTask.pricingModel, newTask.fixedAmount, newTask.estHours, selectedClientForNewTask]);
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    updateTask(t.id, { status: TASK_STATUS.DONE });
-                  }}
-                  className={cx(
-                    "inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-black transition-all",
-                    "bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60"
-                  )}
-                  title="סמן כבוצע"
-                  aria-label="סמן כבוצע"
-                >
-                  <LucideIcon name="Check" className="w-4 h-4" /> בוצע
-                </button>
+      useEffect(() => {
+        // Keep billing amount in sync by default when enabled, but don't overwrite if user already typed a custom value.
+        if (!newTask.billingPlanEnabled) return;
+        setNewTask(prev => {
+          const current = money(prev.billingAmount);
+          const derived = money(derivedNewTaskBillingAmount);
+          if (current === 0 && derived > 0) return { ...prev, billingAmount: derived };
+          return prev;
+        });
+      }, [derivedNewTaskBillingAmount, newTask.billingPlanEnabled]);
 
-                <span className="text-slate-300">|</span>
+      const isNewTaskValid = useMemo(() => {
+        const hasDesc = String(newTask.description || '').trim().length > 0;
+        const hasAssignee = (newTask.assigneeType === 'me') || (newTask.assigneeType === 'vendor' && Boolean(newTask.assigneeId));
+        const pricingOk = (newTask.pricingModel === PRICING_MODEL.HOURLY)
+          ? money(newTask.estHours) > 0
+          : money(newTask.fixedAmount) > 0;
 
-                <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                  <LucideIcon name="ChevronLeft" className="w-4 h-4" /> פרטים
-                </span>
-              </div>
-            </div>
-          </button>
-        );
+        const billingOk = !newTask.billingPlanEnabled
+          ? true
+          : Boolean(newTask.clientId) && Boolean(newTask.billingDueDate) && money(newTask.billingAmount) > 0;
+
+        return hasDesc && hasAssignee && pricingOk && billingOk;
+      }, [newTask]);
+
+      const handleCreateTask = (e) => {
+        e.preventDefault();
+        if (!isNewTaskValid) return;
+
+        const id = `t_${Date.now()}`;
+
+        const task = {
+          id,
+          clientId: newTask.clientId || '',
+          assigneeType: newTask.assigneeType,
+          assigneeId: newTask.assigneeType === 'vendor' ? (newTask.assigneeId || '') : null,
+          description: (newTask.description || '').trim(),
+          status: newTask.status,
+          date: newTask.date,
+          notes: newTask.notes || '',
+          pricingModel: newTask.pricingModel,
+          estHours: money(newTask.pricingModel === PRICING_MODEL.HOURLY ? newTask.estHours : 0),
+          actualHours: money(newTask.pricingModel === PRICING_MODEL.HOURLY ? newTask.actualHours : 0),
+          fixedAmount: money(newTask.pricingModel === PRICING_MODEL.FIXED ? newTask.fixedAmount : 0),
+          billingPlan: (newTask.assigneeType === 'me' && newTask.billingPlanEnabled)
+            ? {
+                enabled: true,
+                kind: newTask.billingPlanKind,
+                dueDate: newTask.billingDueDate,
+                amount: money(newTask.billingAmount)
+              }
+            : null
+        };
+
+        setTasks(prev => [task, ...prev]);
+
+        if (task.billingPlan?.enabled) {
+          upsertBillingFromTask(task);
+        }
+
+        // Reset
+        setNewTask(prev => ({
+          ...prev,
+          description: '',
+          notes: '',
+          status: (prev.assigneeType === 'vendor') ? TASK_STATUS.UNASSIGNED : TASK_STATUS.TODO,
+          actualHours: 0,
+          fixedAmount: 0,
+          billingPlanEnabled: false,
+          billingDueDate: '',
+          billingAmount: 0
+        }));
       };
+
+      const handleQuickDone = (taskId) => updateTask(taskId, { status: TASK_STATUS.DONE });
+
+      // Contacts tab
+      const [contactsView, setContactsView] = useState('all'); // all | clients | vendors
+
+      const visibleContacts = useMemo(() => {
+        if (contactsView === 'clients') return clients;
+        if (contactsView === 'vendors') return vendors;
+        return contacts;
+      }, [contactsView, clients, vendors, contacts]);
+
+      // Billing records filtered
+      const visibleBilling = useMemo(() => {
+        const base = (filterClient === 'all') ? billingRecords : billingRecords.filter(b => b.clientId === filterClient);
+        return [...base].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+      }, [billingRecords, filterClient]);
+
+      const markBillingStatus = (id, status) => {
+        setBillingRecords(prev => prev.map(b => (b.id === id ? { ...b, status } : b)));
+      };
+
+      useEffect(() => {
+        runSelfTests();
+      }, []);
 
       return (
         <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col" dir="rtl">
@@ -664,7 +1200,7 @@
                     </div>
                     <div className="min-w-0">
                       <h1 className="text-lg sm:text-xl font-black leading-none tracking-tight truncate">ESSENCE</h1>
-                      <span className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest block mt-1 truncate">Studio OS – Billing & AI</span>
+                      <span className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest block mt-1 truncate">Studio OS – Billing, Tasks & Vendors</span>
                     </div>
                   </div>
 
@@ -684,30 +1220,9 @@
 
                 <div className="w-full lg:w-auto">
                   <div className="flex bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800/70 shadow-sm w-full lg:w-auto overflow-x-auto custom-scroll">
-                    <TabButton
-                      active={activeTab === 'logs'}
-                      onClick={() => setActiveTabWithHistory('logs')}
-                      iconName="ClipboardList"
-                      title="יומן עבודה"
-                    >
-                      יומן עבודה
-                    </TabButton>
-                    <TabButton
-                      active={activeTab === 'tasks'}
-                      onClick={() => setActiveTabWithHistory('tasks')}
-                      iconName="ListTodo"
-                      title="צ'ק-ליסט"
-                    >
-                      צ'ק-ליסט
-                    </TabButton>
-                    <TabButton
-                      active={activeTab === 'clients'}
-                      onClick={() => setActiveTabWithHistory('clients')}
-                      iconName="Users"
-                      title="לקוחות"
-                    >
-                      לקוחות
-                    </TabButton>
+                    <TabButton active={activeTab === 'logs'} onClick={() => setActiveTabWithHistory('logs')} iconName="ClipboardList" title="יומן עבודה">יומן עבודה</TabButton>
+                    <TabButton active={activeTab === 'tasks'} onClick={() => setActiveTabWithHistory('tasks')} iconName="ListTodo" title="משימות">משימות</TabButton>
+                    <TabButton active={activeTab === 'contacts'} onClick={() => setActiveTabWithHistory('contacts')} iconName="Users" title="אנשי קשר">אנשי קשר</TabButton>
                   </div>
                 </div>
               </div>
@@ -720,7 +1235,7 @@
                 <div className="animate-in">
                   <SectionHeader
                     title="יומן עבודה"
-                    subtitle="דיווח, חישוב שעות וחובות פתוחים"
+                    subtitle="דיווח שעות ללקוחות (חיוב שעתי לפי תעריף לקוח)"
                   />
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
@@ -734,31 +1249,26 @@
 
                         <form onSubmit={handleAddLog} className="space-y-3 sm:space-y-4">
                           <div className="space-y-2">
-                            <label className="text-[11px] font-black text-slate-500">לקוח</label>
-                            <select
-                              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                            <FieldLabel>לקוח</FieldLabel>
+                            <Select
                               value={newLog.clientId}
                               onChange={(e) => handleLogClientChange(e.target.value)}
                               required
                             >
                               <option value="">בחר לקוח...</option>
-                              {clients.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                              ))}
+                              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                               <option value="__add_new__">הוסף לקוח חדש</option>
-                            </select>
+                            </Select>
                           </div>
 
                           <div className="space-y-2">
-                            <label className="text-[11px] font-black text-slate-500">תיאור</label>
+                            <FieldLabel>תיאור</FieldLabel>
                             <div className="relative">
-                              <textarea
-                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                                rows="3"
+                              <Textarea
+                                rows={3}
                                 placeholder="מה התבצע?"
                                 value={newLog.description}
                                 onChange={(e) => setNewLog(prev => ({ ...prev, description: e.target.value }))}
-                                required
                               />
                               <button
                                 type="button"
@@ -767,11 +1277,7 @@
                                 disabled={!newLog.description || isAiPolishing}
                                 title="לטש ניסוח"
                               >
-                                {isAiPolishing ? (
-                                  <LucideIcon name="Loader2" className="animate-spin w-3 h-3" />
-                                ) : (
-                                  <LucideIcon name="Sparkles" className="w-3 h-3" />
-                                )}
+                                {isAiPolishing ? <LucideIcon name="Loader2" className="animate-spin w-3 h-3" /> : <LucideIcon name="Sparkles" className="w-3 h-3" />}
                                 לטיש
                               </button>
                             </div>
@@ -779,22 +1285,20 @@
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-2">
-                              <label className="text-[11px] font-black text-slate-500">דקות</label>
-                              <input
+                              <FieldLabel>דקות</FieldLabel>
+                              <Input
                                 type="number"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                                min="1"
                                 placeholder="דקות"
                                 value={newLog.minutes}
                                 onChange={(e) => setNewLog(prev => ({ ...prev, minutes: e.target.value }))}
                                 required
-                                min="1"
                               />
                             </div>
                             <div className="space-y-2">
-                              <label className="text-[11px] font-black text-slate-500">תאריך</label>
-                              <input
+                              <FieldLabel>תאריך</FieldLabel>
+                              <Input
                                 type="date"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
                                 value={newLog.date}
                                 onChange={(e) => setNewLog(prev => ({ ...prev, date: e.target.value }))}
                               />
@@ -842,23 +1346,18 @@
 
                     <div className="lg:col-span-2 xl:col-span-3 space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div className="text-sm text-slate-500">
-                          מציג {filteredLogs.length} רשומות
-                        </div>
-                        <select
-                          className="w-full sm:w-auto bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
+                        <div className="text-sm text-slate-500">מציג {filteredLogs.length} רשומות</div>
+                        <Select
+                          className="w-full sm:w-auto bg-white"
                           value={filterClient}
                           onChange={(e) => setFilterClient(e.target.value)}
                           title="פילטר לקוח"
                         >
                           <option value="all">כל הלקוחות</option>
-                          {clients.map(c => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
+                          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </Select>
                       </div>
 
-                      {/* Mobile cards */}
                       <div className="md:hidden space-y-3">
                         {filteredLogs.map(log => (
                           <Card key={log.id} className="p-4 sm:p-5">
@@ -888,7 +1387,6 @@
                         )}
                       </div>
 
-                      {/* Desktop table */}
                       <div className="hidden md:block bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden">
                         <div className="overflow-x-auto custom-scroll">
                           <table className="w-full text-right">
@@ -939,28 +1437,49 @@
               {activeTab === 'tasks' && (
                 <div className="animate-in">
                   <SectionHeader
-                    title="צ'ק-ליסט"
-                    subtitle="ניהול משימות עם היררכיה, שליטה ותצוגת פרטים"
+                    title="משימות"
+                    subtitle="ניהול משימות שלך ושל פרילנסרים, כולל הערכה מול בפועל והכנסות/עלויות"
                     right={
-                      <select
-                        className="w-full sm:w-auto bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                        value={filterClient}
-                        onChange={(e) => setFilterClient(e.target.value)}
-                        title="פילטר לקוח"
-                      >
-                        <option value="all">כל הלקוחות</option>
-                        {clients.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
+                      <div className="flex items-center gap-2">
+                        <Select
+                          className="w-full sm:w-auto bg-white"
+                          value={filterClient}
+                          onChange={(e) => setFilterClient(e.target.value)}
+                          title="פילטר לקוח"
+                        >
+                          <option value="all">כל הלקוחות</option>
+                          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </Select>
+                      </div>
                     }
                   />
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    <Card className="p-4 sm:p-5 lg:p-6 xl:col-span-2">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                        <div className="font-black">משימות</div>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+                    <Card className="p-4 sm:p-5 lg:p-6 lg:col-span-2 xl:col-span-3">
+                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+                        <div className="font-black">רשימת משימות</div>
                         <div className="flex items-center gap-2 flex-wrap">
+                          <Button
+                            variant={taskAssigneeView === 'mine' ? 'primary' : 'pill'}
+                            size="sm"
+                            className={cx(taskAssigneeView === 'mine' ? 'font-black' : 'font-normal')}
+                            onClick={() => setTaskAssigneeView('mine')}
+                            title="המשימות שלי"
+                          >
+                            המשימות שלי
+                          </Button>
+                          <Button
+                            variant={taskAssigneeView === 'vendors' ? 'primary' : 'pill'}
+                            size="sm"
+                            className={cx(taskAssigneeView === 'vendors' ? 'font-black' : 'font-normal')}
+                            onClick={() => setTaskAssigneeView('vendors')}
+                            title="משימות לפרילנסרים"
+                          >
+                            משימות לפרילנסרים
+                          </Button>
+
+                          <span className="text-slate-200 mx-1">|</span>
+
                           <Button
                             variant={taskFilter === 'all' ? 'primary' : 'pill'}
                             size="sm"
@@ -1001,204 +1520,487 @@
                         </div>
                       </div>
 
-                      <div className="space-y-3">
-                        {taskFilter === 'all' && (
-                          <>
-                            <div className="p-3 rounded-2xl bg-amber-50 border border-amber-100">
-                              <div className="text-xs font-black text-amber-700">ממתין לי ({taskCounts.waiting})</div>
-                            </div>
-                            <div className="space-y-3">
-                              {taskGroups.waiting.map(t => <TaskItem key={t.id} t={t} />)}
-                              {taskGroups.waiting.length === 0 && (
-                                <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות שממתינות לך</div>
-                              )}
-                            </div>
-
-                            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 mt-4">
-                              <div className="text-xs font-black text-slate-700">אחר ({taskCounts.other})</div>
-                            </div>
-                            <div className="space-y-3">
-                              {taskGroups.other.map(t => <TaskItem key={t.id} t={t} />)}
-                              {taskGroups.other.length === 0 && (
-                                <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות נוספות</div>
-                              )}
-                            </div>
-
-                            <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100 mt-4">
-                              <div className="text-xs font-black text-emerald-700">בוצעו ({taskCounts.done})</div>
-                            </div>
-                            <div className="space-y-3">
-                              {taskGroups.done.map(t => <TaskItem key={t.id} t={t} />)}
-                              {taskGroups.done.length === 0 && (
-                                <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות שבוצעו</div>
-                              )}
-                            </div>
-                          </>
-                        )}
-
-                        {taskFilter !== 'all' && (
-                          <>
-                            {visibleTasks.map(t => <TaskItem key={t.id} t={t} />)}
-                            {visibleTasks.length === 0 && (
-                              <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות להצגה</div>
+                      {taskFilter === 'all' ? (
+                        <div className="space-y-4">
+                          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-100">
+                            <div className="text-xs font-black text-amber-700">ממתין לי ({taskCounts.waiting})</div>
+                          </div>
+                          <div className="space-y-3">
+                            {taskGroups.waiting.map(t => (
+                              <TaskItem
+                                key={t.id}
+                                task={t}
+                                contacts={contacts}
+                                onOpen={openTaskDetails}
+                                onQuickDone={handleQuickDone}
+                              />
+                            ))}
+                            {taskGroups.waiting.length === 0 && (
+                              <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות שממתינות לך</div>
                             )}
-                          </>
-                        )}
-                      </div>
+                          </div>
+
+                          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                            <div className="text-xs font-black text-slate-700">אחר ({taskCounts.other})</div>
+                          </div>
+                          <div className="space-y-3">
+                            {taskGroups.other.map(t => (
+                              <TaskItem
+                                key={t.id}
+                                task={t}
+                                contacts={contacts}
+                                onOpen={openTaskDetails}
+                                onQuickDone={handleQuickDone}
+                              />
+                            ))}
+                            {taskGroups.other.length === 0 && (
+                              <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות נוספות</div>
+                            )}
+                          </div>
+
+                          <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100">
+                            <div className="text-xs font-black text-emerald-700">בוצעו ({taskCounts.done})</div>
+                          </div>
+                          <div className="space-y-3">
+                            {taskGroups.done.map(t => (
+                              <TaskItem
+                                key={t.id}
+                                task={t}
+                                contacts={contacts}
+                                onOpen={openTaskDetails}
+                                onQuickDone={handleQuickDone}
+                              />
+                            ))}
+                            {taskGroups.done.length === 0 && (
+                              <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות שבוצעו</div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {visibleTasks.map(t => (
+                            <TaskItem
+                              key={t.id}
+                              task={t}
+                              contacts={contacts}
+                              onOpen={openTaskDetails}
+                              onQuickDone={handleQuickDone}
+                            />
+                          ))}
+                          {visibleTasks.length === 0 && (
+                            <div className="p-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-500">אין משימות להצגה</div>
+                          )}
+                        </div>
+                      )}
                     </Card>
 
-                    <Card className="p-4 sm:p-5 lg:p-6">
-                      <div className="font-black mb-2">שליטה בתצוגה</div>
-                      <div className="text-sm text-slate-500 mb-4">פילטר לקוח משפיע גם על יומן העבודה והלקוחות</div>
+                    <div className="space-y-4">
+                      <Card className="p-4 sm:p-5 lg:p-6">
+                        <div className="font-black mb-2">סיכום כספי</div>
+                        <div className="text-sm text-slate-600 leading-relaxed">
+                          <div className="flex items-center justify-between py-2 border-b border-slate-100">
+                            <span>הכנסה (בפועל)</span>
+                            <span className="font-black">₪{financialSummary.revenue.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-b border-slate-100">
+                            <span>עלות (בפועל)</span>
+                            <span className="font-black">₪{financialSummary.cost.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-b border-slate-100">
+                            <span>מרווח (בפועל)</span>
+                            <span className={cx("font-black", financialSummary.margin >= 0 ? "text-emerald-700" : "text-red-600")}>
+                              ₪{financialSummary.margin.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <span className="text-slate-500">מרווח (הערכה)</span>
+                            <span className={cx("font-black", financialSummary.estMargin >= 0 ? "text-slate-900" : "text-red-600")}>
+                              ₪{financialSummary.estMargin.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
 
-                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
-                        טיפ UX: משימות הן לחיצות. אפשר לפתוח כרטיס פרטים ולנהל סטטוס בלי לעבור לשוניות.
-                      </div>
+                        <div className="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600">
+                          המרווח מחושב לפי משימות משויכות ללקוח: הכנסות מהמשימות שלך פחות עלויות ממשימות פרילנסרים.
+                        </div>
+                      </Card>
 
-                      <div className="mt-5 grid grid-cols-1 gap-3">
-                        <Button
-                          variant="secondary"
-                          size="lg"
-                          className="w-full font-black"
-                          onClick={() => setActiveTabWithHistory('logs')}
-                          title="חזרה ליומן עבודה"
-                        >
-                          <LucideIcon name="ClipboardList" className="w-4 h-4" /> מעבר ליומן עבודה
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="lg"
-                          className="w-full font-black"
-                          onClick={() => setActiveTabWithHistory('clients')}
-                          title="ניהול לקוחות"
-                        >
-                          <LucideIcon name="Users" className="w-4 h-4" /> מעבר ללקוחות
-                        </Button>
-                      </div>
-                    </Card>
+                      <Card className="p-4 sm:p-5 lg:p-6">
+                        <div className="font-black mb-3">הוספת משימה</div>
+                        <form onSubmit={handleCreateTask} className="space-y-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                              <FieldLabel>מי מבצע?</FieldLabel>
+                              <Select
+                                value={newTask.assigneeType}
+                                onChange={(e) => handleNewTaskAssigneeChange(e.target.value)}
+                              >
+                                <option value="me">אני</option>
+                                <option value="vendor">נותן שירות</option>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <FieldLabel>סטטוס</FieldLabel>
+                              <Select
+                                value={newTask.status}
+                                onChange={(e) => setNewTask(prev => ({ ...prev, status: e.target.value }))}
+                              >
+                                {TASK_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                              </Select>
+                            </div>
+                          </div>
+
+                          {newTask.assigneeType === 'vendor' && (
+                            <div className="space-y-2">
+                              <FieldLabel>נותן שירות</FieldLabel>
+                              <Select
+                                value={newTask.assigneeId}
+                                onChange={(e) => handleNewTaskVendorChange(e.target.value)}
+                                required
+                              >
+                                <option value="">בחר נותן שירות...</option>
+                                {vendors.map(v => <option key={v.id} value={v.id}>{v.name} ({v.role || 'תפקיד'})</option>)}
+                                <option value="__add_new__">הוסף נותן שירות חדש</option>
+                              </Select>
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <FieldLabel>שיוך לקוח (אופציונלי)</FieldLabel>
+                            <Select
+                              value={newTask.clientId}
+                              onChange={(e) => handleNewTaskClientChange(e.target.value)}
+                            >
+                              <option value="">ללא שיוך</option>
+                              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              <option value="__add_new__">הוסף לקוח חדש</option>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <FieldLabel>תיאור משימה</FieldLabel>
+                            <div className="relative">
+                              <Textarea
+                                rows={3}
+                                placeholder="כתוב תיאור קצר ומדויק"
+                                value={newTask.description}
+                                onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => polishDescription(newTask.description, (v) => setNewTask(p => ({ ...p, description: v })))}
+                                className="absolute top-2 left-2 text-[10px] font-black text-indigo-600 flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={!newTask.description || isAiPolishing}
+                                title="לטש ניסוח"
+                              >
+                                {isAiPolishing ? <LucideIcon name="Loader2" className="animate-spin w-3 h-3" /> : <LucideIcon name="Sparkles" className="w-3 h-3" />}
+                                לטיש
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                              <FieldLabel>תאריך יעד</FieldLabel>
+                              <Input type="date" value={newTask.date} onChange={(e) => setNewTask(prev => ({ ...prev, date: e.target.value }))} />
+                            </div>
+
+                            <div className="space-y-2">
+                              <FieldLabel>מודל</FieldLabel>
+                              <Select
+                                value={newTask.pricingModel}
+                                onChange={(e) => setNewTask(prev => ({ ...prev, pricingModel: e.target.value }))}
+                              >
+                                <option value={PRICING_MODEL.HOURLY}>שעתי</option>
+                                <option value={PRICING_MODEL.FIXED}>פיקס</option>
+                              </Select>
+                            </div>
+                          </div>
+
+                          {newTask.pricingModel === PRICING_MODEL.HOURLY ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <FieldLabel>הערכה (שעות)</FieldLabel>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={newTask.estHours}
+                                  onChange={(e) => setNewTask(prev => ({ ...prev, estHours: e.target.value }))}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <FieldLabel>בפועל (שעות)</FieldLabel>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={newTask.actualHours}
+                                  onChange={(e) => setNewTask(prev => ({ ...prev, actualHours: e.target.value }))}
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-700">
+                                {newTask.assigneeType === 'me' ? (
+                                  <>
+                                    <div className="font-black">הכנסה צפויה (הערכה):</div>
+                                    <div className="mt-1">
+                                      {selectedClientForNewTask?.type === CONTACT_TYPE.CLIENT
+                                        ? `₪${money(money(newTask.estHours) * (selectedClientForNewTask.rate || 0)).toLocaleString()} (תעריף לקוח ₪${(selectedClientForNewTask.rate || 0).toLocaleString()}/שעה)`
+                                        : 'בחר לקוח כדי לחשב הכנסה לפי תעריף'
+                                      }
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="font-black">עלות צפויה (הערכה):</div>
+                                    <div className="mt-1">
+                                      {selectedVendorForNewTask?.type === CONTACT_TYPE.VENDOR
+                                        ? `₪${money(money(newTask.estHours) * (selectedVendorForNewTask.hourlyRate || 0)).toLocaleString()} (תעריף נותן שירות ₪${(selectedVendorForNewTask.hourlyRate || 0).toLocaleString()}/שעה)`
+                                        : 'בחר נותן שירות כדי לחשב עלות לפי תעריף'
+                                      }
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <FieldLabel>{newTask.assigneeType === 'me' ? 'סכום חיוב (₪)' : 'סכום עלות (₪)'}</FieldLabel>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={newTask.fixedAmount}
+                                onChange={(e) => setNewTask(prev => ({ ...prev, fixedAmount: e.target.value }))}
+                                required
+                              />
+                            </div>
+                          )}
+
+                          {/* Future billing record only for client-side tasks */}
+                          {newTask.assigneeType === 'me' && (
+                            <div className="p-4 rounded-2xl border border-slate-200 bg-white">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="font-black">רשומת חיוב עתידית</div>
+                                  <div className="text-sm text-slate-500 mt-1">יוצר תזכורת או חשבונית עתידית עם תאריך יעד וסכום</div>
+                                </div>
+                                <label className="inline-flex items-center gap-2 text-sm font-black">
+                                  <input
+                                    type="checkbox"
+                                    checked={newTask.billingPlanEnabled}
+                                    onChange={(e) => setNewTask(prev => ({ ...prev, billingPlanEnabled: e.target.checked }))}
+                                  />
+                                  הפעלה
+                                </label>
+                              </div>
+
+                              {newTask.billingPlanEnabled && (
+                                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="space-y-2">
+                                    <FieldLabel>סוג</FieldLabel>
+                                    <Select
+                                      value={newTask.billingPlanKind}
+                                      onChange={(e) => setNewTask(prev => ({ ...prev, billingPlanKind: e.target.value }))}
+                                    >
+                                      <option value={BILLING_RECORD_KIND.INVOICE}>חשבונית עתידית</option>
+                                      <option value={BILLING_RECORD_KIND.REMINDER}>תזכורת</option>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <FieldLabel>תאריך חיוב</FieldLabel>
+                                    <Input
+                                      type="date"
+                                      value={newTask.billingDueDate}
+                                      onChange={(e) => setNewTask(prev => ({ ...prev, billingDueDate: e.target.value }))}
+                                      required
+                                    />
+                                  </div>
+
+                                  <div className="sm:col-span-2 space-y-2">
+                                    <FieldLabel>סכום</FieldLabel>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      value={newTask.billingAmount}
+                                      onChange={(e) => setNewTask(prev => ({ ...prev, billingAmount: e.target.value }))}
+                                      required
+                                    />
+                                    <div className="text-xs text-slate-500">
+                                      ברירת מחדל: סכום פיקס, או הערכת שעות כפול תעריף לקוח.
+                                    </div>
+                                  </div>
+
+                                  {!newTask.clientId && (
+                                    <div className="sm:col-span-2 p-3 rounded-2xl bg-amber-50 border border-amber-100 text-sm text-amber-700">
+                                      כדי ליצור רשומת חיוב, צריך לשייך לקוח.
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <FieldLabel>הערות (אופציונלי)</FieldLabel>
+                            <Textarea
+                              rows={3}
+                              placeholder="כל דבר שיעזור לך לזכור הקשר, החלטות, לינקים"
+                              value={newTask.notes}
+                              onChange={(e) => setNewTask(prev => ({ ...prev, notes: e.target.value }))}
+                            />
+                          </div>
+
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            size="lg"
+                            className="w-full font-black"
+                            disabled={!isNewTaskValid}
+                            title={!isNewTaskValid ? "חסר תיאור/שיוך נותן שירות/סכום/פרטי חיוב" : "שמירת משימה"}
+                          >
+                            <LucideIcon name="Plus" className="w-4 h-4" /> הוספת משימה
+                          </Button>
+                        </form>
+                      </Card>
+
+                      <Card className="p-4 sm:p-5 lg:p-6">
+                        <div className="font-black mb-2">רשומות חיוב עתידיות</div>
+                        <div className="text-sm text-slate-500 mb-4">תזכורות וחשבוניות מתוזמנות לפי לקוח נבחר</div>
+
+                        <div className="space-y-3">
+                          {visibleBilling.map(b => {
+                            const client = getContactById(contacts, b.clientId);
+                            const kindLabel = BILLING_RECORD_KIND_LABEL[b.kind] || b.kind;
+                            const statusLabel = b.status;
+                            return (
+                              <div key={b.id} className="p-4 rounded-2xl border border-slate-200 bg-white">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="font-black text-sm truncate">{client?.name || 'לקוח הוסר'}</div>
+                                    <div className="text-sm text-slate-500 mt-1">{kindLabel} - {statusLabel}</div>
+                                    <div className="text-sm font-mono text-slate-700 mt-2">{b.dueDate}</div>
+                                  </div>
+                                  <div className="text-sm font-black whitespace-nowrap">₪{money(b.amount).toLocaleString()}</div>
+                                </div>
+
+                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                  <Button variant="pill" size="sm" className="font-normal" onClick={() => markBillingStatus(b.id, BILLING_RECORD_STATUS.SENT)} title="סמן כנשלח">נשלח</Button>
+                                  <Button variant="pill" size="sm" className="font-normal" onClick={() => markBillingStatus(b.id, BILLING_RECORD_STATUS.PAID)} title="סמן כשולם">שולם</Button>
+                                  <Button variant="pill" size="sm" className="font-normal" onClick={() => markBillingStatus(b.id, BILLING_RECORD_STATUS.SCHEDULED)} title="החזר למתוזמן">מתוזמן</Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {visibleBilling.length === 0 && (
+                            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
+                              אין רשומות חיוב להצגה
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {activeTab === 'clients' && (
+              {activeTab === 'contacts' && (
                 <div className="animate-in">
                   <SectionHeader
-                    title="לקוחות"
-                    subtitle="ניהול לקוחות ותנאי חיוב"
+                    title="אנשי קשר"
+                    subtitle="לקוחות ונותני שירות (פרילנסרים)"
                     right={
                       <Button
                         variant="primary"
                         size="md"
                         className="font-black"
-                        onClick={() => openAddClient('none')}
-                        title="הוספת לקוח חדש"
+                        onClick={() => openAddContact({ source: 'none', field: 'none', desiredType: CONTACT_TYPE.CLIENT })}
+                        title="הוספת איש קשר"
                       >
-                        <LucideIcon name="Plus" className="w-4 h-4" /> הוספת לקוח
+                        <LucideIcon name="Plus" className="w-4 h-4" /> הוספת איש קשר
                       </Button>
                     }
                   />
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
-                    <div className="lg:col-span-2 xl:col-span-3 space-y-4">
-                      {/* Mobile cards */}
-                      <div className="md:hidden space-y-3">
-                        {clients.map(c => (
-                          <Card key={c.id} className="p-4 sm:p-5">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="font-black text-sm truncate">{c.name}</div>
-                                <div className="text-sm text-slate-500 mt-1">₪{c.rate}/שעה - {c.terms}</div>
-                              </div>
-                              <div className="text-sm font-black px-2 py-1.5 rounded-xl bg-slate-50 border border-slate-200 whitespace-nowrap">
-                                רף ₪{Number(c.threshold).toLocaleString()}
-                              </div>
-                            </div>
-                          </Card>
-                        ))}
+                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                    <Button variant={contactsView === 'all' ? 'primary' : 'pill'} size="sm" className={cx(contactsView === 'all' ? 'font-black' : 'font-normal')} onClick={() => setContactsView('all')} title="הכול">הכול ({contacts.length})</Button>
+                    <Button variant={contactsView === 'clients' ? 'primary' : 'pill'} size="sm" className={cx(contactsView === 'clients' ? 'font-black' : 'font-normal')} onClick={() => setContactsView('clients')} title="לקוחות">לקוחות ({clients.length})</Button>
+                    <Button variant={contactsView === 'vendors' ? 'primary' : 'pill'} size="sm" className={cx(contactsView === 'vendors' ? 'font-black' : 'font-normal')} onClick={() => setContactsView('vendors')} title="נותני שירות">נותני שירות ({vendors.length})</Button>
+                  </div>
 
-                        <button
-                          onClick={() => openAddClient('none')}
-                          className="w-full p-4 sm:p-5 rounded-[1.5rem] border-2 border-dashed border-slate-300 bg-white hover:bg-slate-50 transition-all text-right focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50"
-                          title="הוספת לקוח חדש"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="font-black">הוספת לקוח חדש</div>
-                              <div className="text-sm text-slate-500 mt-1">מוסיף לקוח לרשימה ומאפשר בחירה מהירה בדיווח עבודה</div>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
+                    <div className="lg:col-span-2 xl:col-span-3 space-y-3">
+                      {visibleContacts.map(c => (
+                        <Card key={c.id} className="p-4 sm:p-5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-black text-sm sm:text-base truncate">{c.name}</div>
+                              <div className="text-sm text-slate-500 mt-1">{CONTACT_TYPE_LABEL[c.type] || c.type}</div>
+
+                              {c.type === CONTACT_TYPE.CLIENT ? (
+                                <div className="text-sm text-slate-600 mt-2">
+                                  ₪{(c.rate || 0).toLocaleString()}/שעה - {c.terms}
+                                </div>
+                              ) : (
+                                <div className="text-sm text-slate-600 mt-2">
+                                  {c.role || 'תפקיד'} - {PRICING_LABEL[c.pricingDefault] || 'מודל'}
+                                  {c.pricingDefault === PRICING_MODEL.HOURLY ? ` - ₪${(c.hourlyRate || 0).toLocaleString()}/שעה` : ''}
+                                  {c.pricingDefault === PRICING_MODEL.FIXED ? ` - ₪${(c.fixedDefault || 0).toLocaleString()} פיקס` : ''}
+                                </div>
+                              )}
                             </div>
-                            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
-                              <LucideIcon name="Plus" className="w-5 h-5" />
+
+                            <div className={cx(
+                              "text-[11px] sm:text-xs font-black px-2.5 py-1.5 rounded-xl border whitespace-nowrap",
+                              c.type === CONTACT_TYPE.CLIENT ? "bg-indigo-50 text-indigo-700 border-indigo-100" : "bg-slate-50 text-slate-700 border-slate-200"
+                            )}>
+                              {c.type === CONTACT_TYPE.CLIENT ? 'לקוח' : 'נותן שירות'}
                             </div>
                           </div>
-                        </button>
-                      </div>
 
-                      {/* Desktop table */}
-                      <div className="hidden md:block bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden">
-                        <div className="overflow-x-auto custom-scroll">
-                          <table className="w-full text-right">
-                            <thead className="bg-slate-50 text-[10px] uppercase font-black text-slate-400 tracking-widest border-b">
-                              <tr>
-                                <th className="px-6 py-4">לקוח</th>
-                                <th className="px-6 py-4 text-center">תעריף</th>
-                                <th className="px-6 py-4 text-center">רף חיוב</th>
-                                <th className="px-6 py-4">תנאים</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {clients.map(c => (
-                                <tr key={c.id} className="hover:bg-slate-50">
-                                  <td className="px-6 py-4 font-black text-sm">{c.name}</td>
-                                  <td className="px-6 py-4 text-center font-black">₪{Number(c.rate).toLocaleString()}</td>
-                                  <td className="px-6 py-4 text-center font-black">₪{Number(c.threshold).toLocaleString()}</td>
-                                  <td className="px-6 py-4 text-sm text-slate-600">{c.terms}</td>
-                                </tr>
-                              ))}
+                          {c.type === CONTACT_TYPE.CLIENT ? (
+                            <div className="mt-3 text-sm text-slate-600">
+                              <span className="font-bold">רף חיוב:</span> ₪{(c.threshold || 0).toLocaleString()}
+                            </div>
+                          ) : null}
+                        </Card>
+                      ))}
 
-                              <tr>
-                                <td colSpan="4" className="px-6 py-5">
-                                  <button
-                                    onClick={() => openAddClient('none')}
-                                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-300 bg-white hover:bg-slate-50 transition-all text-right focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50"
-                                    title="הוספת לקוח חדש"
-                                  >
-                                    <div className="flex items-center justify-between gap-3">
-                                      <div>
-                                        <div className="font-black">הוספת לקוח חדש</div>
-                                        <div className="text-sm text-slate-500 mt-1">מוסיף לקוח לרשימה ומאפשר בחירה מהירה מכל מקום</div>
-                                      </div>
-                                      <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
-                                        <LucideIcon name="Plus" className="w-5 h-5" />
-                                      </div>
-                                    </div>
-                                  </button>
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
+                      <button
+                        onClick={() => openAddContact({ source: 'none', field: 'none', desiredType: CONTACT_TYPE.CLIENT })}
+                        className="w-full p-4 sm:p-5 rounded-[1.5rem] border-2 border-dashed border-slate-300 bg-white hover:bg-slate-50 transition-all text-right focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50"
+                        title="הוספת איש קשר"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="font-black">הוספת איש קשר</div>
+                            <div className="text-sm text-slate-500 mt-1">לקוח או נותן שירות - נגיש מכל מקום</div>
+                          </div>
+                          <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                            <LucideIcon name="Plus" className="w-5 h-5" />
+                          </div>
                         </div>
-                      </div>
+                      </button>
                     </div>
 
                     <div className="space-y-4">
                       <Card className="p-4 sm:p-5 lg:p-6">
-                        <div className="font-black mb-2">סיכום מהיר</div>
-                        <div className="text-sm text-slate-600">
-                          <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                            <span>כמות לקוחות</span>
-                            <span className="font-black">{clients.length}</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <span>חובות פתוחים (סה"כ)</span>
-                            <span className="font-black">₪{clientSummaries.reduce((s, c) => s + c.totalUnpaid, 0).toLocaleString()}</span>
-                          </div>
+                        <div className="font-black mb-2">הגדרה מהירה</div>
+                        <div className="text-sm text-slate-600 leading-relaxed">
+                          אנשי קשר הם בסיס לכל המערכת.
+                          לקוחות משפיעים על חיוב והכנסות, נותני שירות משפיעים על עלויות.
                         </div>
                       </Card>
 
                       <Card className="p-4 sm:p-5 lg:p-6">
-                        <div className="font-black mb-3">טיפ UX</div>
-                        <div className="text-sm text-slate-600 leading-relaxed">
-                          הוספת לקוח זמינה גם מתוך הדרופדאון בדיווח עבודה. אפשר להוסיף לקוח תוך כדי עבודה בלי לצאת מהמסך.
+                        <div className="font-black mb-2">קיצור דרך</div>
+                        <div className="grid grid-cols-1 gap-3 mt-4">
+                          <Button variant="secondary" size="lg" className="w-full font-black" onClick={() => setActiveTabWithHistory('tasks')} title="מעבר למשימות">
+                            <LucideIcon name="ListTodo" className="w-4 h-4" /> מעבר למשימות
+                          </Button>
+                          <Button variant="secondary" size="lg" className="w-full font-black" onClick={() => setActiveTabWithHistory('logs')} title="מעבר ליומן עבודה">
+                            <LucideIcon name="ClipboardList" className="w-4 h-4" /> מעבר ליומן עבודה
+                          </Button>
                         </div>
                       </Card>
                     </div>
@@ -1209,177 +2011,344 @@
           </main>
 
           <footer className="py-8 sm:py-10 text-center opacity-30 text-[10px] font-black uppercase tracking-[0.3em]">
-            © 2025 ESSENCE
+            © 2026 ESSENCE
           </footer>
 
-          <Modal
-            open={isAddClientOpen}
-            title="הוספת לקוח חדש"
-            onClose={closeAddClient}
-          >
-            <form onSubmit={handleCreateClient} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[11px] font-black text-slate-500">שם לקוח</label>
-                <input
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                  value={clientForm.name}
-                  onChange={(e) => setClientForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="לדוגמה: SCN / Impact College"
-                  required
-                />
-              </div>
-
+          {/* Add Contact Modal */}
+          <Modal open={isAddContactOpen} title="הוספת איש קשר" onClose={closeAddContact}>
+            <form onSubmit={handleCreateContact} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500">תעריף (₪/שעה)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                    value={clientForm.rate}
-                    onChange={(e) => setClientForm(p => ({ ...p, rate: e.target.value }))}
-                    required
-                  />
+                  <FieldLabel>סוג</FieldLabel>
+                  <Select
+                    value={contactForm.type}
+                    onChange={(e) => setContactForm(p => ({ ...p, type: e.target.value }))}
+                  >
+                    <option value={CONTACT_TYPE.CLIENT}>לקוח</option>
+                    <option value={CONTACT_TYPE.VENDOR}>נותן שירות</option>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500">רף חיוב (₪)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                    value={clientForm.threshold}
-                    onChange={(e) => setClientForm(p => ({ ...p, threshold: e.target.value }))}
+                  <FieldLabel>שם</FieldLabel>
+                  <Input
+                    value={contactForm.name}
+                    onChange={(e) => setContactForm(p => ({ ...p, name: e.target.value }))}
+                    placeholder={contactForm.type === CONTACT_TYPE.CLIENT ? 'לדוגמה: Impact College' : 'לדוגמה: נועה פרילנס'}
                     required
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[11px] font-black text-slate-500">תנאי תשלום</label>
-                <select
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                  value={clientForm.termsPreset}
-                  onChange={(e) => setClientForm(p => ({ ...p, termsPreset: e.target.value }))}
-                >
-                  {TERMS_PRESETS.map(t => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                  <option value="__custom__">אחר (הקלדה)</option>
-                </select>
+              {contactForm.type === CONTACT_TYPE.CLIENT ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <FieldLabel>תעריף (₪/שעה)</FieldLabel>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={contactForm.rate}
+                        onChange={(e) => setContactForm(p => ({ ...p, rate: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <FieldLabel>רף חיוב (₪)</FieldLabel>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={contactForm.threshold}
+                        onChange={(e) => setContactForm(p => ({ ...p, threshold: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
 
-                {clientForm.termsPreset === '__custom__' && (
-                  <input
-                    className="w-full mt-2 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                    value={clientForm.termsCustom}
-                    onChange={(e) => setClientForm(p => ({ ...p, termsCustom: e.target.value }))}
-                    placeholder="כתוב תנאי תשלום מותאמים"
-                  />
-                )}
-              </div>
+                  <div className="space-y-2">
+                    <FieldLabel>תנאי תשלום</FieldLabel>
+                    <Select
+                      value={contactForm.termsPreset}
+                      onChange={(e) => setContactForm(p => ({ ...p, termsPreset: e.target.value }))}
+                    >
+                      {TERMS_PRESETS.map(t => <option key={t} value={t}>{t}</option>)}
+                      <option value="__custom__">אחר (הקלדה)</option>
+                    </Select>
+
+                    {contactForm.termsPreset === '__custom__' && (
+                      <Input
+                        className="mt-2"
+                        value={contactForm.termsCustom}
+                        onChange={(e) => setContactForm(p => ({ ...p, termsCustom: e.target.value }))}
+                        placeholder="כתוב תנאי תשלום מותאמים"
+                      />
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <FieldLabel>תפקיד</FieldLabel>
+                      <Select
+                        value={contactForm.role}
+                        onChange={(e) => setContactForm(p => ({ ...p, role: e.target.value }))}
+                      >
+                        {VENDOR_ROLE_PRESETS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <FieldLabel>מודל דיפולטי</FieldLabel>
+                      <Select
+                        value={contactForm.pricingDefault}
+                        onChange={(e) => setContactForm(p => ({ ...p, pricingDefault: e.target.value }))}
+                      >
+                        <option value={PRICING_MODEL.HOURLY}>שעתי</option>
+                        <option value={PRICING_MODEL.FIXED}>פיקס</option>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {contactForm.pricingDefault === PRICING_MODEL.HOURLY ? (
+                    <div className="space-y-2">
+                      <FieldLabel>תעריף שעתי (₪/שעה)</FieldLabel>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={contactForm.hourlyRate}
+                        onChange={(e) => setContactForm(p => ({ ...p, hourlyRate: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <FieldLabel>פיקס דיפולטי (₪)</FieldLabel>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={contactForm.fixedDefault}
+                        onChange={(e) => setContactForm(p => ({ ...p, fixedDefault: e.target.value }))}
+                      />
+                    </div>
+                  )}
+
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
+                    נותן שירות ישמש לחישוב עלויות במשימות, ולחישוב מרווח מול הלקוחות.
+                  </div>
+                </>
+              )}
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <Button type="submit" variant="primary" size="lg" className="w-full sm:w-auto font-black">
                   <LucideIcon name="Check" className="w-4 h-4" /> שמירה
                 </Button>
-                <Button type="button" variant="secondary" size="lg" className="w-full sm:w-auto font-black" onClick={closeAddClient}>
+                <Button type="button" variant="secondary" size="lg" className="w-full sm:w-auto font-black" onClick={closeAddContact}>
                   ביטול
                 </Button>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
-                אם פתחת את הטופס מתוך דיווח עבודה, הלקוח החדש ייבחר אוטומטית בשדה הלקוח.
-              </div>
+              {addContactContext.source !== 'none' && (
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
+                  איש הקשר החדש ייבחר אוטומטית במקום שממנו פתחת את הטופס.
+                </div>
+              )}
             </form>
           </Modal>
 
-          <Modal
-            open={Boolean(taskDetailsId)}
-            title={selectedTask ? 'פרטי משימה' : 'פרטי משימה'}
-            onClose={closeTaskDetails}
-          >
+          {/* Task Details Modal */}
+          <Modal open={Boolean(taskDetailsId)} title="פרטי משימה" onClose={closeTaskDetails}>
             {!selectedTask ? (
               <div className="text-sm text-slate-500">לא נמצאה משימה</div>
             ) : (
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                  <div className="font-black text-base sm:text-lg">{selectedTask.description}</div>
-                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
-                      <span className="text-slate-500 font-bold">לקוח</span>
-                      <span className="font-black">{clientNameById(selectedTask.clientId)}</span>
+              (() => {
+                const f = computeTaskFinancials(selectedTask, contacts);
+                const clientName = f.client?.name || 'ללא שיוך';
+                const vendorName = f.vendor?.name || 'לא נבחר';
+
+                const showBilling = Boolean(selectedTask.billingPlan?.enabled && selectedTask.clientId);
+                const linkedBilling = billingRecords.find(b => b.taskId === selectedTask.id);
+
+                return (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <div className="font-black text-base sm:text-lg">{selectedTask.description}</div>
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                          <span className="text-slate-500 font-bold">לקוח</span>
+                          <span className="font-black">{clientName}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                          <span className="text-slate-500 font-bold">מבצע</span>
+                          <span className="font-black">{selectedTask.assigneeType === 'me' ? 'אני' : vendorName}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                          <span className="text-slate-500 font-bold">תאריך</span>
+                          <span className="font-mono text-slate-700 text-base">{selectedTask.date || 'ללא תאריך'}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                          <span className="text-slate-500 font-bold">סטטוס</span>
+                          <span className="font-black">{selectedTask.status}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
-                      <span className="text-slate-500 font-bold">תאריך</span>
-                      <span className="font-mono text-slate-700">{selectedTask.date || 'ללא תאריך'}</span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-4 rounded-2xl border border-slate-200 bg-white">
+                        <div className="text-xs font-black text-slate-500 uppercase tracking-widest">מודל</div>
+                        <div className="mt-2 font-black">{PRICING_LABEL[selectedTask.pricingModel]}</div>
+                        {selectedTask.pricingModel === PRICING_MODEL.HOURLY ? (
+                          <div className="mt-2 text-sm text-slate-700">
+                            <div><span className="text-slate-500">הערכה:</span> <span className="font-black">{money(selectedTask.estHours).toLocaleString()} ש׳</span></div>
+                            <div className="mt-1"><span className="text-slate-500">בפועל:</span> <span className="font-black">{money(selectedTask.actualHours).toLocaleString()} ש׳</span></div>
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-sm text-slate-700">
+                            <span className="text-slate-500">סכום:</span> <span className="font-black">₪{money(selectedTask.fixedAmount).toLocaleString()}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-4 rounded-2xl border border-slate-200 bg-white">
+                        <div className="text-xs font-black text-slate-500 uppercase tracking-widest">תמונה כספית</div>
+                        {selectedTask.assigneeType === 'me' ? (
+                          <div className="mt-2 text-sm text-slate-700">
+                            <div><span className="text-slate-500">הכנסה (הערכה):</span> <span className="font-black">₪{f.estRevenue.toLocaleString()}</span></div>
+                            <div className="mt-1"><span className="text-slate-500">הכנסה (בפועל):</span> <span className="font-black">₪{f.revenue.toLocaleString()}</span></div>
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-sm text-slate-700">
+                            <div><span className="text-slate-500">עלות (הערכה):</span> <span className="font-black">₪{f.estCost.toLocaleString()}</span></div>
+                            <div className="mt-1"><span className="text-slate-500">עלות (בפועל):</span> <span className="font-black">₪{f.cost.toLocaleString()}</span></div>
+                          </div>
+                        )}
+                        {selectedTask.clientId ? (
+                          <div className="mt-3 pt-3 border-t border-slate-100 text-sm">
+                            {(() => {
+                              const totals = computeClientTotals(tasks, contacts, selectedTask.clientId);
+                              return (
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-500">מרווח ללקוח (בפועל)</span>
+                                  <span className={cx("font-black", totals.margin >= 0 ? "text-emerald-700" : "text-red-600")}>
+                                    ₪{totals.margin.toLocaleString()}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
-                      <span className="text-slate-500 font-bold">סטטוס</span>
-                      <span className="font-black">{selectedTask.status}</span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <FieldLabel>סטטוס</FieldLabel>
+                        <Select
+                          value={selectedTask.status}
+                          onChange={(e) => updateTask(selectedTask.id, { status: e.target.value })}
+                        >
+                          {TASK_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <FieldLabel>תאריך</FieldLabel>
+                        <Input
+                          type="date"
+                          value={selectedTask.date || ''}
+                          onChange={(e) => updateTask(selectedTask.id, { date: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <FieldLabel>הערכה (שעות)</FieldLabel>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={selectedTask.estHours}
+                          onChange={(e) => updateTask(selectedTask.id, { estHours: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <FieldLabel>בפועל (שעות)</FieldLabel>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={selectedTask.actualHours}
+                          onChange={(e) => updateTask(selectedTask.id, { actualHours: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2 sm:col-span-2">
+                        <FieldLabel>סכום פיקס (אם רלוונטי)</FieldLabel>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={selectedTask.fixedAmount}
+                          onChange={(e) => updateTask(selectedTask.id, { fixedAmount: e.target.value })}
+                        />
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3">
-                      <span className="text-slate-500 font-bold">פעולות</span>
-                      <span className="text-slate-400">עדכון / מחיקה</span>
+
+                    <div className="space-y-2">
+                      <FieldLabel>פירוט / הערות</FieldLabel>
+                      <Textarea
+                        rows={4}
+                        placeholder="הוסף פירוט שיעזור לך לזכור מה צריך לקרות"
+                        value={selectedTask.notes || ''}
+                        onChange={(e) => updateTask(selectedTask.id, { notes: e.target.value })}
+                      />
+                    </div>
+
+                    {showBilling && (
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                        <div className="font-black">רשומת חיוב למשימה</div>
+                        <div className="text-sm text-slate-600 mt-2">
+                          <div><span className="text-slate-500">סוג:</span> <span className="font-black">{BILLING_RECORD_KIND_LABEL[selectedTask.billingPlan.kind]}</span></div>
+                          <div className="mt-1"><span className="text-slate-500">תאריך:</span> <span className="font-mono text-slate-700">{selectedTask.billingPlan.dueDate}</span></div>
+                          <div className="mt-1"><span className="text-slate-500">סכום:</span> <span className="font-black">₪{money(selectedTask.billingPlan.amount).toLocaleString()}</span></div>
+                        </div>
+
+                        {linkedBilling ? (
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Button variant="pill" size="sm" className="font-normal" onClick={() => markBillingStatus(linkedBilling.id, BILLING_RECORD_STATUS.SENT)} title="נשלח">נשלח</Button>
+                            <Button variant="pill" size="sm" className="font-normal" onClick={() => markBillingStatus(linkedBilling.id, BILLING_RECORD_STATUS.PAID)} title="שולם">שולם</Button>
+                            <Button variant="pill" size="sm" className="font-normal" onClick={() => markBillingStatus(linkedBilling.id, BILLING_RECORD_STATUS.SCHEDULED)} title="מתוזמן">מתוזמן</Button>
+                          </div>
+                        ) : (
+                          <div className="mt-3">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="font-black"
+                              onClick={() => upsertBillingFromTask(selectedTask)}
+                              title="יצירת רשומה"
+                            >
+                              <LucideIcon name="Plus" className="w-4 h-4" /> צור/עדכן רשומת חיוב
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                      <Button variant="subtle" size="lg" className="w-full sm:w-auto font-black" onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.WAITING_ME })} title="העבר ל-ממתין לי">
+                        <LucideIcon name="Clock" className="w-4 h-4" /> ממתין לי
+                      </Button>
+                      <Button variant="subtle" size="lg" className="w-full sm:w-auto font-black" onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.TODO })} title="העבר ל-לביצוע">
+                        <LucideIcon name="ListTodo" className="w-4 h-4" /> לביצוע
+                      </Button>
+                      <Button variant="primary" size="lg" className="w-full sm:w-auto font-black" onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.DONE })} title="סמן כבוצע">
+                        <LucideIcon name="Check" className="w-4 h-4" /> בוצע
+                      </Button>
+                      <Button variant="danger" size="lg" className="w-full sm:w-auto font-black" onClick={() => deleteTask(selectedTask.id)} title="מחיקה">
+                        <LucideIcon name="Trash2" className="w-4 h-4" /> מחיקה
+                      </Button>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
+                      ניווט: אפשר להשתמש בכפתור "חזרה" בהאדר כדי לחזור למסך הקודם בלי לבחור טאבים.
                     </div>
                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500">פירוט / הערות</label>
-                  <textarea
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300/50"
-                    rows="4"
-                    placeholder="הוסף פירוט שיעזור לך לזכור מה צריך לקרות"
-                    value={selectedTask.notes || ''}
-                    onChange={(e) => updateTask(selectedTask.id, { notes: e.target.value })}
-                  />
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-3 pt-1">
-                  <Button
-                    variant="subtle"
-                    size="lg"
-                    className="w-full sm:w-auto font-black"
-                    onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.WAITING })}
-                    title="העבר ל-ממתין לי"
-                  >
-                    <LucideIcon name="Clock" className="w-4 h-4" /> ממתין לי
-                  </Button>
-
-                  <Button
-                    variant="subtle"
-                    size="lg"
-                    className="w-full sm:w-auto font-black"
-                    onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.TODO })}
-                    title="העבר ל-לביצוע"
-                  >
-                    <LucideIcon name="ListTodo" className="w-4 h-4" /> לביצוע
-                  </Button>
-
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    className="w-full sm:w-auto font-black"
-                    onClick={() => updateTask(selectedTask.id, { status: TASK_STATUS.DONE })}
-                    title="סמן כבוצע"
-                  >
-                    <LucideIcon name="Check" className="w-4 h-4" /> בוצע
-                  </Button>
-
-                  <Button
-                    variant="danger"
-                    size="lg"
-                    className="w-full sm:w-auto font-black"
-                    onClick={() => deleteTask(selectedTask.id)}
-                    title="מחיקה"
-                  >
-                    <LucideIcon name="Trash2" className="w-4 h-4" /> מחיקה
-                  </Button>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 leading-relaxed">
-                  ניווט: אפשר להשתמש בכפתור "חזרה" בהאדר כדי לחזור למסך הקודם בלי לבחור טאבים.
-                </div>
-              </div>
+                );
+              })()
             )}
           </Modal>
         </div>
