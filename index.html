@@ -38,6 +38,9 @@
   <!-- Lucide Icons (UMD) -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
+  <!-- Dexie (IndexedDB wrapper) for a real local DB -->
+  <script src="https://unpkg.com/dexie@3.2.5/dist/dexie.min.js"></script>
+
   <style>
     body {
       font-family: 'Noto Sans Hebrew', 'Noto Sans Hebrew New', sans-serif;
@@ -59,6 +62,32 @@
 
   <script type="text/babel">
     const { useState, useMemo, useEffect, useRef } = React;
+
+    /** --- PERSISTENCE (REAL LOCAL DB: IndexedDB via Dexie) --- */
+    const DB_NAME = "essence_studio_os";
+    const hasDexie = (typeof Dexie !== 'undefined');
+
+    const db = hasDexie ? new Dexie(DB_NAME) : null;
+    if (db) {
+      db.version(1).stores({
+        contacts: 'id,type,name',
+        logs: 'id,date,clientId',
+        tasks: 'id,date,clientId,status,assigneeType,assigneeId',
+        billingRecords: 'id,dueDate,clientId,taskId,status',
+        meta: 'key'
+      });
+    }
+
+    const dbGetMeta = async (key, fallback) => {
+      if (!db) return fallback;
+      try {
+        const row = await db.meta.get(key);
+        return (row && typeof row.value !== 'undefined') ? row.value : fallback;
+      } catch (e) {
+        console.warn('[DB] meta get failed', key, e);
+        return fallback;
+      }
+    };
 
     /** --- API CONFIG --- */
     const apiKey = ""; // client-side key is not recommended for production
@@ -629,6 +658,9 @@
 
     /** --- MAIN APP --- */
     const App = () => {
+      const [isHydrating, setIsHydrating] = useState(true);
+      const hydratedRef = useRef(false);
+      const saveTimerRef = useRef(null);
       const [activeTab, setActiveTab] = useState('logs');
       const [tabHistory, setTabHistory] = useState([]);
 
@@ -1180,16 +1212,201 @@
         return [...base].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
       }, [billingRecords, filterClient]);
 
-      const markBillingStatus = (id, status) => {
-        setBillingRecords(prev => prev.map(b => (b.id === id ? { ...b, status } : b)));
+      $1
+
+      /** --- DB TOOLS (EXPORT / IMPORT / RESET) --- */
+      const importFileRef = useRef(null);
+
+      const downloadJson = (obj, filename) => {
+        const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
       };
 
+      const exportDb = async () => {
+        if (!db) {
+          alert('אין DB פעיל (Dexie/IndexedDB לא נטען).');
+          return;
+        }
+        try {
+          const payload = {
+            schemaVersion: 1,
+            exportedAt: new Date().toISOString(),
+            data: {
+              contacts: await db.contacts.toArray(),
+              logs: await db.logs.toArray(),
+              tasks: await db.tasks.toArray(),
+              billingRecords: await db.billingRecords.toArray(),
+              meta: await db.meta.toArray()
+            }
+          };
+          const fname = `essence-studio-os-backup-${new Date().toISOString().slice(0, 10)}.json`;
+          downloadJson(payload, fname);
+        } catch (e) {
+          console.error('[DB] export failed', e);
+          alert('ייצוא נכשל. בדוק קונסול.');
+        }
+      };
+
+      const applyImportedState = (payload) => {
+        const data = payload?.data || {};
+        if (Array.isArray(data.contacts)) setContacts(data.contacts);
+        if (Array.isArray(data.logs)) setLogs(data.logs);
+        if (Array.isArray(data.tasks)) setTasks(data.tasks);
+        if (Array.isArray(data.billingRecords)) setBillingRecords(data.billingRecords);
+
+        const metaArr = Array.isArray(data.meta) ? data.meta : [];
+        const filterRow = metaArr.find(x => x?.key === 'filterClient');
+        const tabRow = metaArr.find(x => x?.key === 'activeTab');
+        if (filterRow && typeof filterRow.value !== 'undefined') setFilterClient(filterRow.value);
+        if (tabRow && typeof tabRow.value !== 'undefined') setActiveTab(tabRow.value);
+      };
+
+      const importDb = async (file) => {
+        if (!db) {
+          alert('אין DB פעיל (Dexie/IndexedDB לא נטען).');
+          return;
+        }
+        if (!file) return;
+
+        try {
+          const text = await file.text();
+          const payload = JSON.parse(text);
+          const data = payload?.data || payload?.data?.data || payload?.data; // backward tolerance
+          const normalized = payload?.data ? payload : { data };
+
+          const contactsArr = Array.isArray(normalized?.data?.contacts) ? normalized.data.contacts : [];
+          const logsArr = Array.isArray(normalized?.data?.logs) ? normalized.data.logs : [];
+          const tasksArr = Array.isArray(normalized?.data?.tasks) ? normalized.data.tasks : [];
+          const billingArr = Array.isArray(normalized?.data?.billingRecords) ? normalized.data.billingRecords : [];
+          const metaArr = Array.isArray(normalized?.data?.meta) ? normalized.data.meta : [];
+
+          await db.transaction('rw', db.contacts, db.logs, db.tasks, db.billingRecords, db.meta, async () => {
+            await db.contacts.clear();
+            await db.logs.clear();
+            await db.tasks.clear();
+            await db.billingRecords.clear();
+            await db.meta.clear();
+
+            if (contactsArr.length) await db.contacts.bulkPut(contactsArr);
+            if (logsArr.length) await db.logs.bulkPut(logsArr);
+            if (tasksArr.length) await db.tasks.bulkPut(tasksArr);
+            if (billingArr.length) await db.billingRecords.bulkPut(billingArr);
+            if (metaArr.length) await db.meta.bulkPut(metaArr);
+          });
+
+          // apply immediately to UI (no need to refresh)
+          applyImportedState({ data: { contacts: contactsArr, logs: logsArr, tasks: tasksArr, billingRecords: billingArr, meta: metaArr } });
+          alert('ייבוא הושלם.');
+        } catch (e) {
+          console.error('[DB] import failed', e);
+          alert('ייבוא נכשל. ודא שזה קובץ JSON תקין של הגיבוי.');
+        } finally {
+          if (importFileRef.current) importFileRef.current.value = '';
+        }
+      };
+
+      const resetDb = async () => {
+        if (!db) {
+          alert('אין DB פעיל (Dexie/IndexedDB לא נטען).');
+          return;
+        }
+        const ok = window.confirm('לאפס את ה-DB המקומי? זה ימחק את כל הנתונים שנשמרו בדפדפן.');
+        if (!ok) return;
+
+        try {
+          await db.delete();
+          window.location.reload();
+        } catch (e) {
+          console.error('[DB] reset failed', e);
+          alert('איפוס נכשל. בדוק קונסול.');
+        }
+      };
+
+      /** --- HYDRATE FROM DB (first load) --- */
       useEffect(() => {
-        runSelfTests();
+        (async () => {
+          if (!db) {
+            hydratedRef.current = true;
+            setIsHydrating(false);
+            return;
+          }
+
+          try {
+            const savedContacts = await db.contacts.toArray();
+            const savedLogs = await db.logs.toArray();
+            const savedTasks = await db.tasks.toArray();
+            const savedBilling = await db.billingRecords.toArray();
+
+            // If DB is empty (first run) keep seeded demo data.
+            if (savedContacts?.length) setContacts(savedContacts);
+            if (savedLogs?.length) setLogs(savedLogs);
+            if (savedTasks?.length) setTasks(savedTasks);
+            if (savedBilling?.length) setBillingRecords(savedBilling);
+
+            const savedFilterClient = await dbGetMeta('filterClient', 'all');
+            const savedActiveTab = await dbGetMeta('activeTab', 'logs');
+
+            if (savedFilterClient) setFilterClient(savedFilterClient);
+            if (savedActiveTab) setActiveTab(savedActiveTab);
+          } catch (e) {
+            console.error('[DB] hydrate failed', e);
+          } finally {
+            hydratedRef.current = true;
+            setIsHydrating(false);
+          }
+        })();
       }, []);
+
+      /** --- PERSIST TO DB (debounced) --- */
+      useEffect(() => {
+        if (!db) return;
+        if (!hydratedRef.current) return;
+
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(async () => {
+          try {
+            await db.transaction('rw', db.contacts, db.logs, db.tasks, db.billingRecords, db.meta, async () => {
+              // Full sync (simple + safe)
+              await db.contacts.clear();
+              await db.logs.clear();
+              await db.tasks.clear();
+              await db.billingRecords.clear();
+
+              if (contacts?.length) await db.contacts.bulkPut(contacts);
+              if (logs?.length) await db.logs.bulkPut(logs);
+              if (tasks?.length) await db.tasks.bulkPut(tasks);
+              if (billingRecords?.length) await db.billingRecords.bulkPut(billingRecords);
+
+              await db.meta.put({ key: 'filterClient', value: filterClient });
+              await db.meta.put({ key: 'activeTab', value: activeTab });
+            });
+          } catch (e) {
+            console.error('[DB] save failed', e);
+          }
+        }, 350);
+
+        return () => {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        };
+      }, [contacts, logs, tasks, billingRecords, filterClient, activeTab]);
 
       return (
         <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col" dir="rtl">
+          {isHydrating && (
+            <div className="fixed inset-0 z-[200] bg-white/70 backdrop-blur-sm flex items-center justify-center p-6">
+              <div className="w-full max-w-md bg-white rounded-[1.5rem] border border-slate-200 shadow-soft p-6 text-center">
+                <div className="text-base font-black">טוען נתונים מה-DB המקומי...</div>
+                <div className="mt-2 text-sm text-slate-500">IndexedDB בדפדפן. אם זו הפעם הראשונה, ייטען דמו.</div>
+              </div>
+            </div>
+          )}
           <nav className="bg-slate-950 text-white shadow-xl sticky top-0 z-50 border-b border-slate-800/60">
             <Container className="py-3 sm:py-4">
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
@@ -1992,17 +2209,43 @@
                         </div>
                       </Card>
 
+                      $1
+
                       <Card className="p-4 sm:p-5 lg:p-6">
-                        <div className="font-black mb-2">קיצור דרך</div>
-                        <div className="grid grid-cols-1 gap-3 mt-4">
-                          <Button variant="secondary" size="lg" className="w-full font-black" onClick={() => setActiveTabWithHistory('tasks')} title="מעבר למשימות">
-                            <LucideIcon name="ListTodo" className="w-4 h-4" /> מעבר למשימות
+                        <div className="font-black mb-2">נתונים מקומיים</div>
+                        <div className="text-sm text-slate-600 leading-relaxed">
+                          הנתונים נשמרים ב-IndexedDB בדפדפן. אפשר לגבות, לייבא, או לאפס.
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 gap-3">
+                          <Button variant="secondary" size="lg" className="w-full font-black" onClick={exportDb} title="גיבוי לקובץ JSON">
+                            <LucideIcon name="Download" className="w-4 h-4" /> גיבוי (Export)
                           </Button>
-                          <Button variant="secondary" size="lg" className="w-full font-black" onClick={() => setActiveTabWithHistory('logs')} title="מעבר ליומן עבודה">
-                            <LucideIcon name="ClipboardList" className="w-4 h-4" /> מעבר ליומן עבודה
+
+                          <input
+                            ref={importFileRef}
+                            type="file"
+                            accept="application/json"
+                            className="hidden"
+                            onChange={(e) => importDb(e.target.files?.[0])}
+                          />
+
+                          <Button
+                            variant="secondary"
+                            size="lg"
+                            className="w-full font-black"
+                            onClick={() => importFileRef.current?.click()}
+                            title="ייבוא מגיבוי JSON"
+                          >
+                            <LucideIcon name="Upload" className="w-4 h-4" /> ייבוא (Import)
+                          </Button>
+
+                          <Button variant="danger" size="lg" className="w-full font-black" onClick={resetDb} title="איפוס DB מקומי">
+                            <LucideIcon name="RotateCcw" className="w-4 h-4" /> איפוס נתונים מקומיים
                           </Button>
                         </div>
                       </Card>
+
                     </div>
                   </div>
                 </div>
